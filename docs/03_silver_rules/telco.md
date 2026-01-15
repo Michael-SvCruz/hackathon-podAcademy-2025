@@ -1,3 +1,23 @@
+# Patch de documentação — Nota sobre `bureau_full` (spine v2)
+
+A partir da disponibilização da tabela **`base_score_bureau_movel_full`** (`bureau_full`), o projeto passa a ter um spine com:
+- `FLAG_INSTALACAO` variando em {0,1} (inclui reprovados)
+- `FPD` observado apenas quando `FLAG_INSTALACAO=1`
+
+**Implicações:**
+- A avaliação de **swap-in/swap-out** e impacto de aprovação/reprovação deve ser feita usando `bureau_full`.
+- Os documentos anteriores:
+  - `bureau` representam o recorte legado (majoritariamente `FLAG_INSTALACAO=1`).
+- Para consistência do projeto, recomenda-se tratar `bureau_full` como **fonte de verdade** para:
+  - universo (spine),
+  - `FLAG_INSTALACAO` (decisão/política),
+  - `FPD` (label de risco, quando observado).
+
+**Reforço (anti-leakage):**
+- `FPD` e `FLAG_INSTALACAO` não devem ser usados como features.
+
+---
+
 # Silver Rules — `base_telco` (`telco`)
 
 ## 1) Objetivo
