@@ -26,16 +26,18 @@ LANDING (Raw)
     ↓
 BRONZE (Leitura + Metadados)
     ├── bureau_full_delta/         ✅ PRONTO
-    └── telco_delta/               ✅ PRONTO
+    ├── telco_delta/               ✅ PRONTO
+    └── cadastro_delta/            ✅ PRONTO
     
 SILVER (Tipagem + Validação)
     ├── bureau_full_silver_delta/  ✅ PRONTO
-    └── telco_silver_delta/        ✅ PRONTO
+    ├── telco_silver_delta/        ✅ PRONTO
+    └── cadastro_silver_delta/     ✅ PRONTO
     
 GOLD (ABTs para Modelagem)
     ├── abt_v1_delta/              ✅ PRONTO (Score_01)
-    ├── abt_v2_delta/              ⏳ PRÓXIMO (Score_02)
-    ├── abt_v3_delta/              ⏳ (Score_02 + Telco)
+    ├── abt_v2_delta/              ✅ PRONTO (+ Score_02)
+    ├── abt_v3_delta/              ⏳ PRÓXIMO (+ Telco)
     ├── abt_v4_delta/              ⏳ (+ Cadastro)
     ├── abt_v5_delta/              ⏳ (+ Recarga)
     └── abt_v6_delta/              ⏳ (+ Pagamento + Atraso)
@@ -68,6 +70,7 @@ GOLD (ABTs para Modelagem)
 |------|---------|--------|-----------|
 | **Bureau Full** | `00_bronze_silver_bureau.ipynb` | ✅ | Tipagem explícita, scores ajustados, deduplicação |
 | **Telco** | `01_bronze_silver_telco.py` | ✅ | Tipagem var_*, tratamento sentinela 304, flags missing |
+| **Cadastro** | `02_bronze_silver_cadastro.py` | ✅ | Parse tolerante datas, idade, CEP, var_* tipagem flexível |
 
 **Localização:** `src/jobs/01_silver/`
 
@@ -81,19 +84,30 @@ GOLD (ABTs para Modelagem)
 **Funções Reutilizáveis:** `src/utils/spark_utils.py`
 - `standardize_column_names()` - Padroniza para snake_case
 - `to_int_safe()` - Cast string→int seguro
-- `to_double_safe()` - Cast string→double seguro
+- `to_double_safe()` - Cast string→double com validação regex (tolera não-numéricos)
+- `to_date_safe()` - Parse tolerante de datas (inválidas → NULL)
 - `treat_sentinel_value()` - Trata sentinelas automaticamente
 
 ---
 
-### **3️⃣ Gold Layer v1 - ABT Score_01 Baseline**
+### **3️⃣ Gold Layer - ABTs Incrementais**
+
+**v1 - Score_01 Baseline:**
 
 | Componente | Arquivo | Status | Descrição |
 |------------|---------|--------|-----------|
 | **Builder** | `00_gold_abt_builder.py` | ✅ | Orquestra build de ABT v1 |
-| **Validator** | `validators/validate_abt.py` | ✅ | 6 gates de validação automática |
+| **Validator** | `validators/validate_abt.py::validate_abt_v1()` | ✅ | 6 gates de validação automática |
 | **Docs Técnicas** | `docs/04_gold_rules/abt_v1.md` | ✅ | Especificação formal |
 | **Quick Start** | `docs/04_gold_rules/00_QUICK_START.md` | ✅ | Guia prático de uso |
+
+**v2 - Score_01 + Score_02 (NOVO):**
+
+| Componente | Arquivo | Status | Descrição |
+|------------|---------|--------|-----------|
+| **Builder** | `01_gold_abt_v2_builder.py` | ✅ | Estende v1 com Score_02 |
+| **Validator** | `validators/validate_abt.py::validate_abt_v2()` | ✅ | 7 gates (v1 + Gate 7 Score_02) |
+| **Docs Técnicas** | `docs/04_gold_rules/abt_v2.md` | ✅ | Especificação formal |
 
 **Localização:** `src/jobs/02_gold/`
 
@@ -134,7 +148,7 @@ Metadados:
 | **Data Dictionary** | `docs/01_data_dictionary/` | ✅ (bureau_full, telco, cadastro, pagamento, recarga, atraso) |
 | **Data Quality** | `docs/02_data_quality/` | ✅ (relatórios de qualidade) |
 | **Silver Rules** | `docs/03_silver_rules/` | ✅ (regras de transformação) |
-| **Gold Rules** | `docs/04_gold_rules/` | ✅ (especificação ABT v1) |
+| **Gold Rules** | `docs/04_gold_rules/` | ✅ (especificação ABT v1, v2) |
 | **Glossário** | `docs/glossary_credit_risk.md` | ✅ |
 | **Target Definition** | `docs/target_definition.md` | ✅ (evento âncora + labels) |
 | **Overview** | `docs/00_overview.md` | ✅ (CRISP-DM + metodologia) |
@@ -148,9 +162,9 @@ Metadados:
 | Versão | Features | Status | KS Esperado | Próximas Ações |
 |--------|----------|--------|------------|---|
 | **v1** | Score_01 | ✅ PRONTO | ≈ 33,1 | Treinar modelo, medir KS |
-| **v2** | + Score_02 | ⏳ Próximo | ΔKS = ? | Replicar padrão v1 |
-| **v3** | + Telco (var_*) | ⏳ | ΔKS = ? | Adicionar 68 features |
-| **v4** | + Cadastro | ⏳ | ΔKS = ? | Implementar Silver Cadastro |
+| **v2** | + Score_02 | ✅ PRONTO | ΔKS = ? | Treinar, medir ΔKS vs v1 |
+| **v3** | + Telco (var_26-93) | ⏳ Próximo | ΔKS = ? | Criar 01_gold_abt_v3_builder.py |
+| **v4** | + Cadastro | ⏳ | ΔKS = ? | Usar Silver Cadastro ✅ |
 | **v5** | + Recarga | ⏳ | ΔKS = ? | Agregar events Recarga |
 | **v6** | + Pagamento + Atraso | ⏳ | ΔKS = ? | Agregar events Pag/Atraso |
 
