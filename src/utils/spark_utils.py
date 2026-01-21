@@ -60,18 +60,28 @@ def treat_sentinel_value(colname, sentinel_values=[304]):
     result = treat_sentinel_value("var_29", sentinel_values=[304])
     df = df.withColumn(result["colname_treated"], result["expr_treated"]) \
            .withColumn(result["flag_name"], result["expr_flag"])
+    
+    IMPORTANTE: A comparação com sentinelas é feita em STRING para evitar
+    erros de cast implícito com valores decimais.
     """
-    col_expr = F.col(colname).cast("double")
+    # Converter sentinelas para string para comparação segura
+    sentinel_str_values = [str(s) for s in sentinel_values]
     
-    sentinel_condition = F.col(colname).isin(sentinel_values)
+    # Checar se é NULL, vazio ou sentinela (como string)
+    sentinel_condition = F.col(colname).isin(sentinel_str_values)
     
+    # Fazer o cast para double APÓS a comparação da sentinela
     expr_treated = F.when(
-        col_expr.isNull() | (F.trim(F.col(colname)) == "") | sentinel_condition,
+        F.col(colname).isNull() | 
+        (F.trim(F.col(colname)) == "") | 
+        sentinel_condition,
         F.lit(None)
-    ).otherwise(col_expr)
+    ).otherwise(F.col(colname).cast("double"))
     
     expr_flag = F.when(
-        col_expr.isNull() | (F.trim(F.col(colname)) == "") | sentinel_condition,
+        F.col(colname).isNull() | 
+        (F.trim(F.col(colname)) == "") | 
+        sentinel_condition,
         F.lit(1)
     ).otherwise(F.lit(0))
     
