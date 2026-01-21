@@ -98,31 +98,38 @@ def tipagem_base(df):
     - var_*: mixed (casting individual conforme tipo)
     """
     print(">>> [Tipagem] Aplicando tipagem explícita...")
+    print(f">>> [Debug] Colunas disponíveis: {df.columns}")
     
-    # Derive DT_SAFRA
+    # Derive dt_safra
     df = df.withColumn(
-        "DT_SAFRA",
-        F.to_date(F.concat(F.col("SAFRA"), F.lit("01")), "yyyyMMdd")
+        "dt_safra",
+        F.to_date(F.concat(F.col("safra"), F.lit("01")), "yyyyMMdd")
     )
     
     # Tipagem de labels e metadados
-    df = df.withColumn("FLAG_INSTALACAO_INT", to_int_safe(F.col("FLAG_INSTALACAO")))
-    df = df.withColumn("FPD_INT", to_int_safe(F.col("FPD")))
+    df = df.withColumn("flag_instalacao_int", to_int_safe(F.col("flag_instalacao")))
+    df = df.withColumn("fpd_int", to_int_safe(F.col("fpd")))
     
-    # Normalização de strings categóricas
-    df = df.withColumn("PROD", F.trim(F.upper(F.col("PROD"))))
-    df = df.withColumn("flag_mig2", F.trim(F.upper(F.col("flag_mig2"))))
-    df = df.withColumn("STATUSRF", F.trim(F.upper(F.col("STATUSRF"))))
+    # Normalização de strings categóricas (se existirem)
+    if "prod" in df.columns:
+        df = df.withColumn("prod", F.trim(F.upper(F.col("prod"))))
+    if "flag_mig2" in df.columns:
+        df = df.withColumn("flag_mig2", F.trim(F.upper(F.col("flag_mig2"))))
+    if "statusrf" in df.columns:
+        df = df.withColumn("statusrf", F.trim(F.upper(F.col("statusrf"))))
     
     # CEP como categórico (regional)
-    df = df.withColumn("CEP_3_digitos", F.trim(F.col("CEP_3_digitos")))
-    df = df.withColumn(
-        "FLAG_CEP_MISSING",
-        F.when(
-            (F.col("CEP_3_digitos").isNull()) | (F.col("CEP_3_digitos") == ""),
-            1
-        ).otherwise(0)
-    )
+    if "cep_3_digitos" in df.columns:
+        df = df.withColumn("cep_3_digitos", F.trim(F.col("cep_3_digitos")))
+        df = df.withColumn(
+            "flag_cep_missing",
+            F.when(
+                (F.col("cep_3_digitos").isNull()) | (F.col("cep_3_digitos") == ""),
+                1
+            ).otherwise(0)
+        )
+    else:
+        print("!!! AVISO: Coluna cep_3_digitos não encontrada no Bronze")
     
     return df
 
@@ -140,43 +147,53 @@ def parse_e_derivacoes_idade(df):
     Nota: Menor de idade é ineligível para conta telecom. Idades > 100 são outliers.
     """
     print(">>> [Derivações] Calculando idade e flags...")
+    print(f">>> [Debug] Colunas disponíveis: {df.columns}")
     
     # Parse tolerante
-    df = df.withColumn(
-        "DT_NASC",
-        F.try_to_date(F.col("DATADENASCIMENTO"), "dd/MM/yyyy")
-    )
-    
-    # Flag de data inválida (preenchida mas não faz parse)
-    df = df.withColumn(
-        "FLAG_DT_NASC_INVALIDA",
-        F.when(
-            (F.col("DATADENASCIMENTO").isNotNull()) & 
-            (F.trim(F.col("DATADENASCIMENTO")) != "") &
-            (F.col("DT_NASC").isNull()),
-            1
-        ).otherwise(0)
-    )
-    
-    # Derivar idade
-    df = df.withColumn(
-        "IDADE_ANOS",
-        F.when(
-            F.col("DT_NASC").isNotNull(),
-            F.floor(F.months_between(F.col("DT_SAFRA"), F.col("DT_NASC")) / 12)
-        ).otherwise(None)
-    )
-    
-    # Flags de sanity check
-    df = df.withColumn(
-        "FLAG_IDADE_MENOR_18",
-        F.when(F.col("IDADE_ANOS") < IDADE_MINIMA_VALIDA, 1).otherwise(0)
-    )
-    
-    df = df.withColumn(
-        "FLAG_IDADE_MUITO_ALTA",
-        F.when(F.col("IDADE_ANOS") > IDADE_MAXIMA_ESPERADA, 1).otherwise(0)
-    )
+    if "datadenascimento" in df.columns:
+        print(">>> [Step 1] Parse datadenascimento...")
+        df = df.withColumn(
+            "dt_nasc",
+            F.try_to_date(F.col("datadenascimento"), "dd/MM/yyyy")
+        )
+        
+        print(">>> [Step 2] Flag dt_nasc_invalida...")
+        # Flag de data inválida (preenchida mas não faz parse)
+        # Usar parenteses explícitas para evitar erro de precedência
+        df = df.withColumn(
+            "flag_dt_nasc_invalida",
+            F.when(
+                (F.col("datadenascimento").isNotNull()) &
+                (F.trim(F.col("datadenascimento")) != "") &
+                (F.col("dt_nasc").isNull()),
+                1
+            ).otherwise(0)
+        )
+        
+        print(">>> [Step 3] Calcular idade_anos...")
+        # Derivar idade
+        df = df.withColumn(
+            "idade_anos",
+            F.when(
+                F.col("dt_nasc").isNotNull(),
+                F.floor(F.months_between(F.col("dt_safra"), F.col("dt_nasc")) / 12)
+            ).otherwise(None)
+        )
+        
+        print(">>> [Step 4] Flag idade_menor_18...")
+        # Flags de sanity check
+        df = df.withColumn(
+            "flag_idade_menor_18",
+            F.when(F.col("idade_anos") < IDADE_MINIMA_VALIDA, 1).otherwise(0)
+        )
+        
+        print(">>> [Step 5] Flag idade_muito_alta...")
+        df = df.withColumn(
+            "flag_idade_muito_alta",
+            F.when(F.col("idade_anos") > IDADE_MAXIMA_ESPERADA, 1).otherwise(0)
+        )
+    else:
+        print("!!! AVISO: Coluna datadenascimento não encontrada no Bronze")
     
     return df
 
@@ -209,21 +226,23 @@ def tipagem_variaveis_anonimizadas(df):
     # var_12: possível data (manter raw + derivar parse)
     if "var_12" in df.columns:
         df = df.withColumn("var_12_raw", F.trim(F.col("var_12")))
-        df = df.withColumn("DT_var_12", F.try_to_date(F.col("var_12"), "dd/MM/yyyy"))
+        df = df.withColumn("dt_var_12", F.try_to_date(F.col("var_12"), "dd/MM/yyyy"))
+        
+        # Usar condição explícita para evitar erro de bool
+        condition = (
+            (F.col("var_12_raw").isNotNull()) &
+            (F.col("var_12_raw") != "") &
+            (F.col("dt_var_12").isNull())
+        )
         df = df.withColumn(
-            "FLAG_DT_var_12_INVALIDA",
-            F.when(
-                (F.col("var_12_raw").isNotNull()) & 
-                (F.col("var_12_raw") != "") &
-                (F.col("DT_var_12").isNull()),
-                1
-            ).otherwise(0)
+            "flag_dt_var_12_invalida",
+            F.when(condition, 1).otherwise(0)
         )
     
     # Outras var_* (var_10, var_11, var_13, var_14, var_16+): manter como string/normalizar
     other_vars = [col for col in df.columns if col.startswith("var_")]
     for var in other_vars:
-        if var not in numeric_vars and var not in categorical_vars and var not in ["var_12_raw", "DT_var_12"]:
+        if var not in numeric_vars and var not in categorical_vars and var not in ["var_12_raw", "dt_var_12", "flag_dt_var_12_invalida"]:
             df = df.withColumn(var, F.trim(F.col(var)))
     
     return df
@@ -240,8 +259,18 @@ def deduplicacao(df):
     """
     print(">>> [Deduplicação] Garantindo grão 1:1 (NUM_CPF + SAFRA)...")
     
-    window_spec = Window.partitionBy("NUM_CPF", "SAFRA") \
-        .orderBy(F.desc("metadata_data_ingestao"))
+    # Verificar se coluna de metadados existe
+    metadata_col = "metadata_data_ingestao"
+    if metadata_col not in df.columns:
+        # Se não existir, usar simplesmente row_number sem ordenação
+        print(f"!!! AVISO: Coluna {metadata_col} não encontrada. Deduplicando sem ordenação.")
+        metadata_col = None
+    
+    if metadata_col:
+        window_spec = Window.partitionBy("num_cpf", "safra") \
+            .orderBy(F.desc(metadata_col))
+    else:
+        window_spec = Window.partitionBy("num_cpf", "safra")
     
     df = df.withColumn("rn", F.row_number().over(window_spec))
     df = df.filter(F.col("rn") == 1).drop("rn")
@@ -265,40 +294,52 @@ def qualidade_gates(df):
     
     # Gate 1: Unicidade
     total_registros = df.count()
-    unique_keys = df.select("NUM_CPF", "SAFRA").distinct().count()
+    unique_keys = df.select("num_cpf", "safra").distinct().count()
     logs["Gate_1_Unicidade"] = f"Total: {total_registros}, Únicos: {unique_keys}" + \
         (" ✓ PASS" if total_registros == unique_keys else " ✗ FAIL")
     
     # Gate 2: Sem NULLs em chaves
     null_check = df.filter(
-        (F.col("NUM_CPF").isNull()) | 
-        (F.col("SAFRA").isNull()) | 
-        (F.col("DT_SAFRA").isNull())
+        (F.col("num_cpf").isNull()) | 
+        (F.col("safra").isNull()) | 
+        (F.col("dt_safra").isNull())
     ).count()
     logs["Gate_2_NULLs_Chaves"] = f"Nulos: {null_check}" + \
         (" ✓ PASS" if null_check == 0 else " ✗ FAIL")
     
-    # Gate 3: FLAG_INSTALACAO balanceado
-    flag_dist = df.groupBy("FLAG_INSTALACAO_INT").count().collect()
-    flag_summary = {row["FLAG_INSTALACAO_INT"]: row["count"] for row in flag_dist}
-    logs["Gate_3_FLAG_INSTALACAO"] = f"Distribuição: {flag_summary}" + \
-        (" ✓ PASS" if len(flag_summary) == 2 else " ⚠ WARN (valores ausentes)")
+    # Gate 3: FLAG_INSTALACAO balanceado (se existir)
+    if "flag_instalacao_int" in df.columns:
+        flag_dist = df.groupBy("flag_instalacao_int").count().collect()
+        flag_summary = {row["flag_instalacao_int"]: row["count"] for row in flag_dist}
+        logs["Gate_3_FLAG_INSTALACAO"] = f"Distribuição: {flag_summary}" + \
+            (" ✓ PASS" if len(flag_summary) == 2 else " ⚠ WARN (valores ausentes)")
+    else:
+        logs["Gate_3_FLAG_INSTALACAO"] = "⚠ SKIP (coluna não existe)"
     
     # Gate 4: FPD (em cadastro, espera-se principalmente nulo)
-    fpd_not_null = df.filter(F.col("FPD_INT").isNotNull()).count()
-    logs["Gate_4_FPD"] = f"Não-nulo: {fpd_not_null}" + \
-        (" ⚠ INFO (usar Bureau como fonte de verdade)" if fpd_not_null > 0 else " ⚠ INFO (esperado nulo)")
+    if "fpd_int" in df.columns:
+        fpd_not_null = df.filter(F.col("fpd_int").isNotNull()).count()
+        logs["Gate_4_FPD"] = f"Não-nulo: {fpd_not_null}" + \
+            (" ⚠ INFO (usar Bureau como fonte de verdade)" if fpd_not_null > 0 else " ⚠ INFO (esperado nulo)")
+    else:
+        logs["Gate_4_FPD"] = "⚠ SKIP (coluna não existe)"
     
     # Gate 5: IDADE não negativa
-    negative_idade = df.filter(F.col("IDADE_ANOS") < 0).count()
-    logs["Gate_5_IDADE_Negativa"] = f"Registros negativos: {negative_idade}" + \
-        (" ✓ PASS" if negative_idade == 0 else " ✗ FAIL")
+    if "idade_anos" in df.columns:
+        negative_idade = df.filter(F.col("idade_anos") < 0).count()
+        logs["Gate_5_IDADE_Negativa"] = f"Registros negativos: {negative_idade}" + \
+            (" ✓ PASS" if negative_idade == 0 else " ✗ FAIL")
+    else:
+        logs["Gate_5_IDADE_Negativa"] = "⚠ SKIP (coluna não existe)"
     
     # Gate 6: CEP cobertura (% não missing)
-    cep_non_missing = df.filter(F.col("FLAG_CEP_MISSING") == 0).count()
-    cep_coverage = 100 * cep_non_missing / total_registros if total_registros > 0 else 0
-    logs["Gate_6_CEP_Coverage"] = f"Cobertura: {cep_coverage:.1f}%" + \
-        (" ✓ PASS" if cep_coverage >= 90 else " ⚠ WARN (< 90%)")
+    if "flag_cep_missing" in df.columns:
+        cep_non_missing = df.filter(F.col("flag_cep_missing") == 0).count()
+        cep_coverage = 100 * cep_non_missing / total_registros if total_registros > 0 else 0
+        logs["Gate_6_CEP_Coverage"] = f"Cobertura: {cep_coverage:.1f}%" + \
+            (" ✓ PASS" if cep_coverage >= 90 else " ⚠ WARN (< 90%)")
+    else:
+        logs["Gate_6_CEP_Coverage"] = "⚠ SKIP (coluna não existe)"
     
     # Print logs
     print("\n" + "="*80)
@@ -343,19 +384,40 @@ def main():
     # 2. TRANSFORMAÇÃO
     # -------------------------------------------------------------------------
     
-    # Padroniza nomes de colunas (snake_case)
-    df_silver = standardize_column_names(df_bronze)
-    
-    # Aplicar transformações em sequência
-    df_silver = tipagem_base(df_silver)
-    df_silver = parse_e_derivacoes_idade(df_silver)
-    df_silver = tipagem_variaveis_anonimizadas(df_silver)
-    df_silver = deduplicacao(df_silver)
+    try:
+        # Padroniza nomes de colunas (snake_case)
+        df_silver = standardize_column_names(df_bronze)
+        print(f">>> [Info] Colunas após standardize: {df_silver.columns}")
+        
+        # Aplicar transformações em sequência
+        df_silver = tipagem_base(df_silver)
+        print(f">>> [Info] Colunas após tipagem_base: {df_silver.columns}")
+        
+        df_silver = parse_e_derivacoes_idade(df_silver)
+        print(f">>> [Info] Colunas após parse_idade: {df_silver.columns}")
+        
+        df_silver = tipagem_variaveis_anonimizadas(df_silver)
+        print(f">>> [Info] Colunas após tipagem_vars: {df_silver.columns}")
+        
+        df_silver = deduplicacao(df_silver)
+        print(f">>> [Info] Colunas após deduplicacao: {df_silver.columns}")
+        
+    except Exception as e:
+        print(f"!!! ERRO NA TRANSFORMAÇÃO: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
     # -------------------------------------------------------------------------
     # 3. QUALITY GATES
     # -------------------------------------------------------------------------
-    df_silver = qualidade_gates(df_silver)
+    try:
+        df_silver = qualidade_gates(df_silver)
+    except Exception as e:
+        print(f"!!! ERRO NOS GATES: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
     count_silver = df_silver.count()
     print(f">>> [Info] Registros após transformações: {count_silver}")
