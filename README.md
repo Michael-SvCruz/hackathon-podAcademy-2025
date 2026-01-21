@@ -312,7 +312,7 @@ hackathon-podAcademy-2025/
    - Qual feature contribui mais
    - Decisões para v4+
 
-### **Médio Prazo (Próximas 4 semanas)**
+### **Médio Prazo (Próximos dias)**
 
 5. **Criar ABT v4 (Cadastro)**
    - Silver Cadastro já está pronto ✅
@@ -333,7 +333,7 @@ hackathon-podAcademy-2025/
    - LEFT JOIN: v5 + Pagamento + Atraso
    - Medir ΔKS = KS_v6 - KS_v5
 
-### **Longo Prazo (Próximas 8+ semanas)**
+### **Longo Prazo (Próximas semana)**
 
 8. **Documentar ganhos incrementais (v1-v6)**
     - Tabela: Versão | KS | ΔKS | Features Adicionadas
