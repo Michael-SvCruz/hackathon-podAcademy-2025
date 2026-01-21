@@ -101,13 +101,21 @@ GOLD (ABTs para Modelagem)
 | **Docs Técnicas** | `docs/04_gold_rules/abt_v1.md` | ✅ | Especificação formal |
 | **Quick Start** | `docs/04_gold_rules/00_QUICK_START.md` | ✅ | Guia prático de uso |
 
-**v2 - Score_01 + Score_02 (NOVO):**
+**v2 - Score_01 + Score_02:**
 
 | Componente | Arquivo | Status | Descrição |
 |------------|---------|--------|-----------|
 | **Builder** | `01_gold_abt_v2_builder.py` | ✅ | Estende v1 com Score_02 |
 | **Validator** | `validators/validate_abt.py::validate_abt_v2()` | ✅ | 7 gates (v1 + Gate 7 Score_02) |
 | **Docs Técnicas** | `docs/04_gold_rules/abt_v2.md` | ✅ | Especificação formal |
+
+**v3 - Score_01 + Score_02 + Telco (NOVO):**
+
+| Componente | Arquivo | Status | Descrição |
+|------------|---------|--------|-----------|
+| **Builder** | `02_gold_abt_v3_builder.py` | ✅ | Estende v2 com Telco (68 vars) |
+| **Validator** | `validators/validate_abt.py::validate_abt_v3()` | ✅ | 8 gates (v2 + Gate 8 Telco) |
+| **Docs Técnicas** | `docs/04_gold_rules/abt_v3.md` | ✅ | Especificação formal |
 
 **Localização:** `src/jobs/02_gold/`
 
@@ -148,7 +156,7 @@ Metadados:
 | **Data Dictionary** | `docs/01_data_dictionary/` | ✅ (bureau_full, telco, cadastro, pagamento, recarga, atraso) |
 | **Data Quality** | `docs/02_data_quality/` | ✅ (relatórios de qualidade) |
 | **Silver Rules** | `docs/03_silver_rules/` | ✅ (regras de transformação) |
-| **Gold Rules** | `docs/04_gold_rules/` | ✅ (especificação ABT v1, v2) |
+| **Gold Rules** | `docs/04_gold_rules/` | ✅ (v1, v2, v3 completos) |
 | **Glossário** | `docs/glossary_credit_risk.md` | ✅ |
 | **Target Definition** | `docs/target_definition.md` | ✅ (evento âncora + labels) |
 | **Overview** | `docs/00_overview.md` | ✅ (CRISP-DM + metodologia) |
@@ -163,8 +171,10 @@ Metadados:
 |--------|----------|--------|------------|---|
 | **v1** | Score_01 | ✅ PRONTO | ≈ 33,1 | Treinar modelo, medir KS |
 | **v2** | + Score_02 | ✅ PRONTO | ΔKS = ? | Treinar, medir ΔKS vs v1 |
-| **v3** | + Telco (var_26-93) | ⏳ Próximo | ΔKS = ? | Criar 01_gold_abt_v3_builder.py |
-| **v4** | + Cadastro | ⏳ | ΔKS = ? | Usar Silver Cadastro ✅ |
+| **v3** | + Telco (var_26-93) | ✅ PRONTO | ΔKS = ? | Treinar, medir ΔKS vs v2 |
+| **v4** | + Cadastro | ⏳ Próximo | ΔKS = ? | Criar 03_gold_abt_v4_builder.py |
+| **v5** | + Recarga | ⏳ | ΔKS = ? | Agregar events Recarga |
+| **v6** | + Pagamento + Atraso | ⏳ | ΔKS = ? | Agregar events Pag/Atraso |
 | **v5** | + Recarga | ⏳ | ΔKS = ? | Agregar events Recarga |
 | **v6** | + Pagamento + Atraso | ⏳ | ΔKS = ? | Agregar events Pag/Atraso |
 
