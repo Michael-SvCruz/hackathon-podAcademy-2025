@@ -37,8 +37,8 @@ SILVER (Tipagem + Validação)
 GOLD (ABTs para Modelagem)
     ├── abt_v1_delta/              ✅ PRONTO (Score_01)
     ├── abt_v2_delta/              ✅ PRONTO (+ Score_02)
-    ├── abt_v3_delta/              ⏳ PRÓXIMO (+ Telco)
-    ├── abt_v4_delta/              ⏳ (+ Cadastro)
+    ├── abt_v3_delta/              ✅ PRONTO (+ Telco 68 vars)
+    ├── abt_v4_delta/              ⏳ PRÓXIMO (+ Cadastro)
     ├── abt_v5_delta/              ⏳ (+ Recarga)
     └── abt_v6_delta/              ⏳ (+ Pagamento + Atraso)
 ```
@@ -175,26 +175,26 @@ Metadados:
 | **v4** | + Cadastro | ⏳ Próximo | ΔKS = ? | Criar 03_gold_abt_v4_builder.py |
 | **v5** | + Recarga | ⏳ | ΔKS = ? | Agregar events Recarga |
 | **v6** | + Pagamento + Atraso | ⏳ | ΔKS = ? | Agregar events Pag/Atraso |
-| **v5** | + Recarga | ⏳ | ΔKS = ? | Agregar events Recarga |
-| **v6** | + Pagamento + Atraso | ⏳ | ΔKS = ? | Agregar events Pag/Atraso |
 
 ---
 
 ## 🚀 Como Usar
 
-### **Executar Gold v1**
+### **Executar Gold v1, v2, ou v3**
 
 ```bash
 # Opção 1: Databricks Notebook
-%run /Workspace/src/jobs/02_gold/00_gold_abt_builder.py
+%run /Workspace/src/jobs/02_gold/00_gold_abt_builder.py       # v1
+%run /Workspace/src/jobs/02_gold/01_gold_abt_v2_builder.py    # v2
+%run /Workspace/src/jobs/02_gold/02_gold_abt_v3_builder.py    # v3
 
-# Opção 2: Spark Submit
+# Opção 2: Spark Submit (exemplo v3)
 spark-submit \
   --py-files src/ \
-  src/jobs/02_gold/00_gold_abt_builder.py
+  src/jobs/02_gold/02_gold_abt_v3_builder.py
 
 # Opção 3: Python direto
-python src/jobs/02_gold/00_gold_abt_builder.py
+python src/jobs/02_gold/02_gold_abt_v3_builder.py
 ```
 
 ### **Saída Esperada**
@@ -254,8 +254,10 @@ hackathon-podAcademy-2025/
 │       ├── 01_silver/                  ← Transformação (✅)
 │       │   ├── 00_bronze_silver_bureau.ipynb
 │       │   └── 01_bronze_silver_telco.py
-│       └── 02_gold/                    ← ABTs (✅ v1)
+│   └── 02_gold/                    ← ABTs (✅ v1, v2, v3)
 │           ├── 00_gold_abt_builder.py
+│           ├── 01_gold_abt_v2_builder.py
+│           ├── 02_gold_abt_v3_builder.py
 │           └── validators/
 │               └── validate_abt.py
 │
@@ -287,58 +289,68 @@ hackathon-podAcademy-2025/
 
 ### **Imediato (Próximas semanas)**
 
-1. **Testar ABT v1 no Databricks**
+1. **Treinar modelos com v1, v2, v3**
    ```bash
-   spark-submit src/jobs/02_gold/00_gold_abt_builder.py
+   python src/jobs/02_gold/00_gold_abt_builder.py       # v1: Score_01
+   python src/jobs/02_gold/01_gold_abt_v2_builder.py    # v2: + Score_02
+   python src/jobs/02_gold/02_gold_abt_v3_builder.py    # v3: + Telco (68 vars)
    ```
 
-2. **Validar 6 gates de qualidade**
+2. **Validar 8 gates de qualidade para v3**
+   - ✅ Gates 1-6: Iguais a v1 (unicidade, FPD, chaves, labels, Score_01)
+   - ✅ Gate 7: Score_02 cobertura > 50%
+   - ✅ Gate 8: Telco cobertura > 20% (fonte complementar)
    - Todos devem passar
-   - Se falhar, revisar dados/código
 
-3. **Treinar modelo com v1**
-   - Features: `score_01_adj`, `flag_score01_missing`
-   - Target: `fpd_int` (SÓ em `flag_instalacao_int=1`)
-   - Métrica: KS no OOT (fev/mar)
+3. **Medir KS incremental**
+   - Treinar v1: Medir KS baseline (esperado ≈ 33,1)
+   - Treinar v2: Calcular ΔKS = KS_v2 - KS_v1 (impacto Score_02)
+   - Treinar v3: Calcular ΔKS = KS_v3 - KS_v2 (impacto Telco 68 vars)
 
-4. **Medir KS baseline**
-   - Esperado: ≈ 33,1
-   - Se KS >> 33,1 → melhor que histórico! 🎉
-   - Se KS << 33,1 → debugar
+4. **Documentar ganhos**
+   - Feature importance por versão
+   - Qual feature contribui mais
+   - Decisões para v4+
 
 ### **Médio Prazo (Próximas 4 semanas)**
 
-5. **Criar ABT v2**
-   - Adicionar `SCORE_02_ADJ`
-   - Replicar padrão v1
-   - Comparar ΔKS vs v1
+5. **Criar ABT v4 (Cadastro)**
+   - Silver Cadastro já está pronto ✅
+   - Criar `03_gold_abt_v4_builder.py`
+   - LEFT JOIN: v3 + Cadastro (var_02-25, edad, CEP)
+   - Validação: Gate 9 (Cadastro cobertura > 30%)
+   - Medir ΔKS = KS_v4 - KS_v3
 
-6. **Criar Silver + Gold v3 (Telco)**
-   - Silver Telco já está pronto
-   - JOIN com bureau_full
-   - Adicionar 68 features var_*
+6. **Criar ABT v5 (Recarga)**
+   - Implementar Silver Recarga (agregação temporal)
+   - Criar `04_gold_abt_v5_builder.py`
+   - LEFT JOIN: v4 + Recarga (features de evento)
+   - Medir ΔKS = KS_v5 - KS_v4
 
-7. **Criar Silver + Gold v4 (Cadastro)**
-   - Estudar dados Cadastro
-   - Implementar regras Silver
-   - Agregar por NUM_CPF + SAFRA
+7. **Criar ABT v6 (Pagamento + Atraso)**
+   - Implementar Silver Pagamento e Atraso
+   - Criar `05_gold_abt_v6_builder.py`
+   - LEFT JOIN: v5 + Pagamento + Atraso
+   - Medir ΔKS = KS_v6 - KS_v5
 
 ### **Longo Prazo (Próximas 8+ semanas)**
 
-8. **Criar Gold v5 (Recarga)**
-   - Base event-level
-   - Agregação temporal (M1, M3, M6)
-   - Features de trend + recência
+8. **Documentar ganhos incrementais (v1-v6)**
+    - Tabela: Versão | KS | ΔKS | Features Adicionadas
+    - Feature importance acumulada
+    - Trade-off: complexidade vs ganho marginal
+    - Decisão final: qual versão usar em produção?
 
-9. **Criar Gold v6 (Pagamento + Atraso)**
-   - Bases event-level
-   - Agregação temporal similar
-   - Features de cadência
+9. **Análise de Swaps e Impacto**
+    - Quantos cliente muda de aprovação/reprovação por versão?
+    - Estimativa de revenue impact
+    - Recomendação de roll-out strategy
 
-10. **Documentar ganhos incrementais**
-    - ΔKS por versão
-    - Feature importance
-    - Análise de swaps
+10. **Preparação para Produção**
+    - Pipeline automatizado (Databricks Jobs)
+    - Monitoring de data quality
+    - Retraining strategy (mensal/trimestral)
+    - Governance e audit trail
 
 ---
 
@@ -396,11 +408,16 @@ Para dúvidas sobre:
 |------------|--------|--------------|
 | Bronze Bureau | ✅ | ✅ |
 | Bronze Telco | ✅ | ✅ |
+| Bronze Cadastro | ✅ | ✅ |
 | Silver Bureau | ✅ | ✅ |
 | Silver Telco | ✅ | ✅ |
+| Silver Cadastro | ✅ | ✅ |
 | Gold v1 (Score_01) | ✅ | ✅ |
+| Gold v2 (+ Score_02) | ✅ | ✅ |
+| Gold v3 (+ Telco 68 vars) | ✅ | ✅ |
+| Gold v4+ | ⏳ | 📋 |
 | Funções Reutilizáveis | ✅ | ✅ |
-| Gold v2+ | ⏳ | 📋 |
+| Modelagem & KS | ⏳ | 📋 |
 
 ---
 
@@ -410,4 +427,4 @@ Para dúvidas sobre:
 
 ---
 
-**Última atualização:** 21 jan 2026 | **Versão:** 1.0 | **Status:** Em desenvolvimento
+**Última atualização:** 21 jan 2026 | **Versão:** 1.1 | **Status:** v1/v2/v3 ✅ | **Próximo:** v4 Cadastro
