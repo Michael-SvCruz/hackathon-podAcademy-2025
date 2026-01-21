@@ -43,11 +43,42 @@ def to_int_safe(colname):
 def to_double_safe(colname):
     """
     Converte string -> double de forma segura (vazio/null vira null).
+    Para valores não numéricos, retorna NULL (não falha).
     
     Uso: df.withColumn("col_dbl", to_double_safe("col_str"))
     """
-    return F.when(F.col(colname).isNull() | (F.trim(F.col(colname)) == ""), F.lit(None)) \
-            .otherwise(F.col(colname).cast("double"))
+    # Primeiro trata NULL e vazio
+    col_trimmed = F.when(F.col(colname).isNull() | (F.trim(F.col(colname)) == ""), F.lit(None)).otherwise(F.trim(F.col(colname)))
+    
+    # Depois tenta cast, retornando NULL se falhar (não numérico)
+    # Usa regex para checar se é numérico antes de fazer cast
+    return F.when(
+        F.col(colname).isNull() | (F.trim(F.col(colname)) == ""),
+        F.lit(None)
+    ).when(
+        # Verifica se é numérico (inteiro ou decimal, positivo ou negativo)
+        F.trim(F.col(colname)).rlike("^[+-]?([0-9]*[.,])?[0-9]+$"),
+        F.col(colname).cast("double")
+    ).otherwise(
+        F.lit(None)
+    )
+
+def to_date_safe(colname, date_format="dd/MM/yyyy"):
+    """
+    Converte string -> date de forma tolerante (valores inválidos vira null).
+    Não falha em parsing inválido.
+    
+    Uso: df.withColumn("col_date", to_date_safe("col_str", "dd/MM/yyyy"))
+    """
+    return F.when(
+        (F.col(colname).isNull()) | (F.trim(F.col(colname)) == ""),
+        F.lit(None)
+    ).otherwise(
+        F.from_unixtime(
+            F.unix_timestamp(F.col(colname), date_format),
+            date_format
+        ).cast("date")
+    )
 
 def treat_sentinel_value(colname, sentinel_values=[304]):
     """
