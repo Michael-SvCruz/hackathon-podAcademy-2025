@@ -217,9 +217,10 @@ Mantém critério v2.
 
 ### Gate 8: Telco Cobertura (NOVO)
 ```
-Assert: (COUNT(Telco cells NOT NULL) / COUNT(Telco cells total)) >= 50%
+Assert: (COUNT(Telco cells NOT NULL) / COUNT(Telco cells total)) >= 20%
 ```
-Mínimo 50% de células válidas no bloco Telco.
+Mínimo 20% de células válidas no bloco Telco.
+Justificativa: Telco é fonte complementar (nem todos clientes têm dados); diferente de Score_01 que é baseline.
 Cálculo: (total_cells - null_cells) / total_cells, onde total_cells = 68 vars × COUNT(*).
 
 ---

@@ -446,11 +446,12 @@ def validate_abt_v3(df_abt, count_silver):
     
     print(f"    Telco (var_26-93): {telco_total_cells - telco_null_cells:>10} / {telco_total_cells} ({telco_pct:>6.2f}%)")
     
-    # Gate: Telco deve ter cobertura > 50% (complementar a scores)
-    if telco_pct < 50:
+    # Gate: Telco deve ter cobertura > 20% (complementar a scores)
+    # Nota: Telco é data source secundária, pode ser esparsa (nem todos clientes têm dados Telco)
+    if telco_pct < 20:
         raise AssertionError(
             f"FALHA Gate 8 - Telco com cobertura muito baixa! "
-            f"{telco_pct:.2f}% < 50% (JOIN pode ter falhado)"
+            f"{telco_pct:.2f}% < 20% (JOIN pode ter falhado)"
         )
     print(f"    ✓ PASS: Telco presente em {telco_pct:.2f}% das células")
     

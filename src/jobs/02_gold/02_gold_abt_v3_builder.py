@@ -46,7 +46,7 @@ VALIDAÇÕES OBRIGATÓRIAS:
 4. Distribuições balanceadas dos labels
 5. Score_01 présente com cobertura razoável (v1)
 6. Score_02 présente com cobertura > 40% (v2)
-7. Cobertura Telco > 50% (v3 novo)
+7. Cobertura Telco > 20% (v3 novo)
 
 AJUSTES UNITY CATALOG:
 - Leitura de Silver Bureau e Silver Telco (tabelas Databricks)
@@ -116,9 +116,8 @@ def build_abt_v3(df_bureau, df_telco):
         "score_01_adj",
         "flag_score01_missing",
         
-        # Features v2
-        "score_02_adj",
-        "flag_score02_missing",
+        # Features v2 (raw, será ajustado aqui em v3)
+        "score_02_dbl",
         
         # Metadados Bureau
         "prod",
@@ -147,7 +146,6 @@ def build_abt_v3(df_bureau, df_telco):
         if flag_col in df_telco.columns:
             telco_cols_to_select.append(flag_col)
     
-    # Renomear colunas de chave para match com Bureau
     df_telco_prepared = df_telco.select(*telco_cols_to_select)
 
     # Step 3: JOIN LEFT Bureau + Telco (Bureau é spine)
@@ -159,7 +157,18 @@ def build_abt_v3(df_bureau, df_telco):
         how="left"
     )
 
-    # Step 4: Selecionar e ordenar colunas logicamente
+    # Step 4: Tratar sentinela em SCORE_02 (0 → NULL) - CRÍTICO
+    # Score_02 vem como score_02_dbl da Silver Bureau
+    print(">>> [Transform] Tratando sentinela Score_02 (0 → NULL)...")
+    df_abt = df_abt.withColumn(
+        "score_02_adj",
+        F.when(F.col("score_02_dbl") == 0, F.lit(None)).otherwise(F.col("score_02_dbl"))
+    ).withColumn(
+        "flag_score02_missing",
+        F.when(F.col("score_02_dbl").isNull() | (F.col("score_02_dbl") == 0), F.lit(1)).otherwise(F.lit(0))
+    ).drop("score_02_dbl")
+
+    # Step 5: Selecionar e ordenar colunas logicamente
     df_abt = df_abt.select(
         # CHAVES (obrigatórias para identificação)
         "num_cpf",
@@ -194,7 +203,7 @@ def build_abt_v3(df_bureau, df_telco):
         "metadata_versao_regra"
     )
 
-    # Step 5: Adicionar metadados de gold
+    # Step 6: Adicionar metadados de gold
     df_abt = df_abt \
         .withColumn("gold_version", F.lit(GOLD_VERSION)) \
         .withColumn("gold_build_date", F.current_timestamp()) \
