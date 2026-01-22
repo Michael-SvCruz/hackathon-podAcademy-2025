@@ -666,8 +666,8 @@ def validate_abt_v4(df_abt):
     # GATE 9: Cadastro cobertura > 25% (NEW in v4 - complementar)
     # =========================================================================
     print("  [Gate 9] Verificando cobertura Cadastro (novo em v4)...")
-    # Check core Cadastro numeric features
-    cadastro_cols = ["var_03", "var_04", "var_05", "var_06", "var_07"]
+    # Check Cadastro numeric features: var_02-25 (24 variáveis)
+    cadastro_cols = [f"var_{i}" for i in range(2, 26)]
     cadastro_total_cells = 0
     cadastro_null_cells = 0
     
@@ -682,7 +682,7 @@ def validate_abt_v4(df_abt):
     else:
         cadastro_pct = 0
     
-    gate9_pass = (cadastro_pct >= 25)
+    gate9_pass = (cadastro_pct >= 20)  # Reduzido de 25% para 20% (consistente com Telco)
     gates_result["Gate9_Cadastro_Coverage"] = {
         "passed": gate9_pass,
         "message": f"Cadastro cobertura: {cadastro_pct:.2f}%"

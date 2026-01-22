@@ -61,7 +61,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, DateType, TimestampType
 
 from src.utils.spark_utils import get_spark_session
-from .validators.validate_abt import validate_abt_v3
+from validators.validate_abt import validate_abt_v3
 
 # =============================================================================
 # CONFIGURAÇÃO PADRÃO (DESENVOLVIMENTO / DATABRICKS COMMUNITY)

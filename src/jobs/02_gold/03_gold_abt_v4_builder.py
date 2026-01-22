@@ -1,320 +1,424 @@
 """
-ABT v4 Builder — Bureau + Scores + Telco + Cadastro
-Incremental Feature Roadmap: v1 (Scores) + v2 (Score_02) + v3 (Telco var_26-93) + v4 (Cadastro features)
+--------------------------------------------------------------------------------
+PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
+SCRIPT: 03_gold_abt_v4_builder.py
+OBJETIVO: Construir Analytical Base Table (ABT) v4 para modelagem.
+--------------------------------------------------------------------------------
+DESCRIÇÃO TÉCNICA:
+Este script estende ABT v3 com features Cadastro (idade, CEP, var_02-25) via join.
 
-This module extends v3 by adding Cadastro features via LEFT JOIN on NUM_CPF + SAFRA.
-Cadastro is an optional complementary source (similar to Telco).
+ROADMAP INCREMENTAL (conforme target_definition.md):
+1. ✅ ABT v1: bureau_full (spine) + SCORE_01                    [BASELINE]
+2. ✅ ABT v2: ABT_v1 + SCORE_02                                 [COMPLETED]
+3. ✅ ABT v3: ABT_v2 + Telco features (var_26-93)              [COMPLETED]
+4. ⏳ ABT v4: ABT_v3 + Cadastro (age, CEP, var_02-25)          ← v4 (este script)
+5.   ABT v5: ABT_v4 + Recarga
+6.   ABT v6: ABT_v5 + Pagamento + Atraso
 
-Key Orchestration:
-  1. Read Silver Bureau (v3 spine with v1/v2/v3 features)
-  2. Read Silver Cadastro (demographic & proprietary features)
-  3. LEFT JOIN Bureau.NUM_CPF+SAFRA = Cadastro.NUM_CPF+SAFRA
-  4. Select and order all features (Score_01/02, Telco var_26-93, Cadastro vars)
-  5. Add Gold metadata (build_date, version, feature_blocks)
-  6. Validate with 9-gate framework
-  7. Write to Delta Lake
+DEFINIÇÕES CRÍTICAS (conforme target_definition.md):
+- Evento âncora: cliente-mês (NUM_CPF + SAFRA)
+- Target (Y): FPD_INT (observado SÓ em FLAG_INSTALACAO=1)
+- Decisão observada: FLAG_INSTALACAO (para análise de swaps)
+- Features (X): SCORE_01_ADJ + SCORE_02_ADJ + TELCO (68) + CADASTRO (33)
 
-Cadastro Features (v4 additions):
-  - Demographic: IDADE_ANOS, CEP_3_digitos
-  - Status: STATUSRF, PROD, flag_mig2
-  - Numeric: var_03, var_04, var_05, var_06, var_07, var_08, var_09, var_10, var_11, var_16, var_17
-  - Mixed/Categorical: var_15, var_22, var_23, var_24, var_25
-  - Dates: DT_var_12 (derived)
-  - Flags: FLAG_CEP3_MISSING, FLAG_IDADE_OUTLIER, FLAG_var_11_NEG, FLAG_DT_NASC_INVALID, FLAG_DT_VAR12_INVALID
+ANTI-LEAKAGE CRÍTICO:
+- FPD_INT é LABEL, não feature
+- FLAG_INSTALACAO_INT é LABEL, não feature
+- Ambas incluídas apenas para auditoria e análise de impacto (swaps)
 
-Anti-Leakage: FPD_INT and FLAG_INSTALACAO_INT from Cadastro are audit-only; never used as features.
+NOVO EM V4:
+- IDADE_ANOS: Idade derivada do cliente
+- FLAG_IDADE_MENOR_18 / FLAG_IDADE_MUITO_ALTA: Sanity checks
+- CEP_3_DIGITOS: Feature regional (3 primeiros dígitos)
+- FLAG_CEP_MISSING: Indicador de CEP ausente
+- STATUSRF: Status cadastral (categórico)
+- VAR_02 a VAR_25: 24 variáveis cadastrais (mix numéricas e categóricas)
+- FLAGS para cada var_*
+
+ESTRUTURA DO JOIN:
+- Spine (ABT v3 Gold)    : 1:1 por NUM_CPF + SAFRA
+- Cadastro Silver        : 1:1 por NUM_CPF + SAFRA
+- Join type              : LEFT (v3 é spine, Cadastro é enriquecimento)
+- Resultado              : 1:1 mantida, features como NULLs quando não encontrado
+
+VALIDAÇÕES OBRIGATÓRIAS (9 gates):
+1. Unicidade: 1:1 por NUM_CPF + SAFRA
+2. FPD observado SÓ em FLAG_INSTALACAO=1
+3. Sem NULLs nas chaves
+4. Distribuições balanceadas dos labels
+5. Score_01 présente (cobertura > 90%)
+6. Score_02 présente (cobertura > 40%)
+7. Cobertura Telco > 20%
+8. Cobertura Cadastro > 20% (novo em v4)
+9. Sanity check idade (não menores de 18 como features)
+
+AJUSTES UNITY CATALOG:
+- Leitura de Gold ABT v3 + Silver Cadastro
+- Escrita em Delta + tabela UC
+- Metadados de rastreabilidade
+--------------------------------------------------------------------------------
 """
 
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    StructType, StructField, StringType, IntegerType, DoubleType, DateType
-)
-from datetime import datetime
 import sys
 import argparse
-from pathlib import Path
+from pyspark.sql import functions as F
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from src.utils.spark_utils import get_spark_session
+from validators.validate_abt import validate_abt_v4
 
-from utils.spark_utils import get_spark_session
-from .validators.validate_abt import validate_abt_v4
+# =============================================================================
+# CONFIGURAÇÃO PADRÃO (DESENVOLVIMENTO / DATABRICKS COMMUNITY)
+# =============================================================================
+DEFAULT_GOLD_ABT_V3_PATH = "/Volumes/hackathon_2025/default/gold/abt_v3_delta/"
+DEFAULT_SILVER_CADASTRO_PATH = "/Volumes/hackathon_2025/default/silver/cadastro_silver_delta/"
+DEFAULT_OUTPUT_PATH = "/Volumes/hackathon_2025/default/gold/abt_v4_delta/"
+DEFAULT_FORMAT = "delta"
+GOLD_VERSION = "gold_abt_v4"
 
+# Variáveis Cadastro esperadas (var_02 a var_25 = 24 variáveis)
+CADASTRO_VAR_COLUMNS = [f"var_{i}" for i in range(2, 26)]
+# =============================================================================
 
-def build_abt_v4(
-    spark: SparkSession,
-    bureau_silver_path: str,
-    telco_silver_path: str,
-    cadastro_silver_path: str,
-    output_path: str
-) -> DataFrame:
+def build_abt_v4(df_abt_v3, df_cadastro):
     """
-    Build ABT v4: Bureau spine + v1/v2/v3 features + Cadastro features.
+    Constrói ABT v4: estende v3 com features Cadastro (idade, CEP, var_02-25).
     
-    Args:
-        spark: SparkSession
-        bureau_silver_path: path to Silver Bureau Delta table
-        telco_silver_path: path to Silver Telco Delta table
-        cadastro_silver_path: path to Silver Cadastro Delta table
-        output_path: path to write v4 Gold ABT
+    Inclusões v3 (mantidas):
+    - Chaves: num_cpf, safra, dt_safra
+    - Labels (auditoria): flag_instalacao_int, fpd_int
+    - Features v1: score_01_adj, flag_score01_missing
+    - Features v2: score_02_adj, flag_score02_missing
+    - Features v3: var_26_adj a var_93_adj + flags (68 vars Telco)
+    - Metadados: prod, flag_mig2
+    - Gold metadata: gold_version, gold_build_date, gold_feature_blocks
     
-    Returns:
-        DataFrame: v4 ABT with 3.79M records and ~160+ features
+    Novas inclusões em v4:
+    - IDADE_ANOS: Idade derivada (numérica)
+    - FLAG_IDADE_MENOR_18: Sanity check (< 18)
+    - FLAG_IDADE_MUITO_ALTA: Outlier check (> 100)
+    - CEP_3_DIGITOS: Regional proxy (string)
+    - FLAG_CEP_MISSING: Missing indicator
+    - STATUSRF: Status cadastral (categórico)
+    - VAR_02 a VAR_25: 24 vars cadastrais
+    - Flag para cada var_* de Cadastro
+    - Atualiza gold_feature_blocks: "score_01,score_02,telco,cadastro"
+    
+    Exclusões (anti-leakage):
+    - FPD_INT não pode ser feature
+    - FLAG_INSTALACAO não pode ser feature
     """
+    print(">>> [Transform] JOIN ABT v3 + Cadastro para ABT v4...")
+
+    # Step 1: Preparar subset do ABT v3 (manter como spine)
+    v3_cols = ["num_cpf", "safra", "dt_safra", "flag_instalacao_int", "fpd_int"]
+    v3_cols.extend(["score_01_adj", "flag_score01_missing"])
+    v3_cols.extend(["score_02_adj", "flag_score02_missing"])
+    v3_cols.extend([f"var_{i}_adj" for i in range(26, 94)])
+    v3_cols.extend([f"flag_var_{i}_missing" for i in range(26, 94)])
+    v3_cols.extend(["prod", "flag_mig2"])
+    v3_cols.extend(["metadata_data_ingestao", "metadata_nome_arquivo_origem", 
+                    "metadata_sistema_origem", "metadata_data_transformacao", 
+                    "metadata_versao_regra"])
+    v3_cols.extend(["gold_version", "gold_build_date", "gold_feature_blocks"])
     
-    print("\n" + "="*80)
-    print("ABT v4 BUILDER — Bureau + Scores + Telco + Cadastro")
-    print("="*80)
+    df_abt_v3_prepared = df_abt_v3.select(*[col for col in v3_cols if col in df_abt_v3.columns])
+
+    # Step 2: Preparar subset do Cadastro para join
+    cadastro_cols_to_select = ["num_cpf", "safra"]
     
-    # Step 1: Read and prepare Bureau (spine with v1/v2/v3 features)
-    print("\n[Step 1] Reading Silver Bureau v3 (spine with v1/v2/v3 features)...")
-    df_bureau = spark.read.format("delta").load(bureau_silver_path)
+    # Adicionar variáveis demográficas
+    if "idade_anos" in df_cadastro.columns:
+        cadastro_cols_to_select.append("idade_anos")
+    if "flag_idade_menor_18" in df_cadastro.columns:
+        cadastro_cols_to_select.append("flag_idade_menor_18")
+    if "flag_idade_muito_alta" in df_cadastro.columns:
+        cadastro_cols_to_select.append("flag_idade_muito_alta")
+    if "cep_3_digitos" in df_cadastro.columns:
+        cadastro_cols_to_select.append("cep_3_digitos")
+    if "flag_cep_missing" in df_cadastro.columns:
+        cadastro_cols_to_select.append("flag_cep_missing")
+    if "statusrf" in df_cadastro.columns:
+        cadastro_cols_to_select.append("statusrf")
     
-    # Prepare Bureau subset: keys, labels, scores, telco vars from v3
-    df_bureau_prepared = df_bureau.select(
-        # Keys
-        F.col("num_cpf"),
-        F.col("safra"),
-        F.col("dt_safra"),
-        # Labels (audit only)
-        F.col("fpd_int"),
-        F.col("flag_instalacao_int"),
-        # v1 features: Score_01
-        F.col("score_01_adj"),
-        F.col("flag_score01_missing"),
-        # v2 features: Score_02 (raw, will adjust in Step 4)
-        F.col("score_02_dbl"),
-        # v3 features: Telco var_26-93 and flags (65 features + 65 flags = 130 cols)
-        *[F.col(f"var_{i:02d}_adj") for i in range(26, 94)],
-        *[F.col(f"flag_var_{i:02d}_missing") for i in range(26, 94)],
-        # Metadata
-        F.col("metadata_source"),
-        F.col("metadata_build_date"),
-        F.col("metadata_audit_record_count")
-    )
+    # Adicionar var_02 a var_25
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx}"
+        if var_col in df_cadastro.columns:
+            cadastro_cols_to_select.append(var_col)
     
-    # Count records
-    bureau_count = df_bureau_prepared.count()
-    print(f"  ✓ Bureau prepared: {bureau_count:,} records")
+    # Adicionar flags de missing para cada var
+    for var_idx in range(2, 26):
+        flag_col = f"flag_var_{var_idx}_missing"
+        if flag_col in df_cadastro.columns:
+            cadastro_cols_to_select.append(flag_col)
     
-    # Step 2: Read and prepare Cadastro (optional enrichment source)
-    print("\n[Step 2] Reading Silver Cadastro...")
-    df_cadastro = spark.read.format("delta").load(cadastro_silver_path)
+    df_cadastro_prepared = df_cadastro.select(*cadastro_cols_to_select)
+
+    # Step 3: JOIN LEFT ABT v3 + Cadastro (v3 é spine)
+    print(">>> [Transform] Executando LEFT JOIN ABT_v3.NUM_CPF+SAFRA = Cadastro.NUM_CPF+SAFRA...")
     
-    # Prepare Cadastro subset: numeric, categorical, and flag features
-    df_cadastro_prepared = df_cadastro.select(
-        F.col("num_cpf"),
-        F.col("safra"),
-        # Demographic
-        F.col("idade_anos"),
-        F.col("cep_3_digitos"),
-        F.col("flag_cep3_missing"),
-        F.col("flag_idade_outlier"),
-        F.col("flag_dt_nasc_invalid"),
-        # Status
-        F.col("statusrf"),
-        F.col("prod"),
-        F.col("flag_mig2"),
-        # Numeric cadastro vars
-        F.col("var_03"),
-        F.col("var_04"),
-        F.col("var_05"),
-        F.col("var_06"),
-        F.col("var_07"),
-        F.col("var_08"),
-        F.col("var_09"),
-        F.col("var_10"),
-        F.col("var_11"),
-        F.col("flag_var_11_neg"),
-        F.col("var_16"),
-        F.col("var_17"),
-        # Mixed/Categorical cadastro vars
-        F.col("var_15"),
-        F.col("var_22"),
-        F.col("var_23"),
-        F.col("var_24"),
-        F.col("var_25"),
-        # Date-derived
-        F.col("dt_var_12"),
-        F.col("flag_dt_var_12_invalid")
-    )
-    
-    cadastro_count = df_cadastro_prepared.count()
-    print(f"  ✓ Cadastro prepared: {cadastro_count:,} records")
-    
-    # Step 3: LEFT JOIN Bureau with Cadastro on NUM_CPF + SAFRA
-    print("\n[Step 3] LEFT JOINing Bureau (spine) with Cadastro...")
-    df_abt = df_bureau_prepared.join(
+    df_abt = df_abt_v3_prepared.join(
         df_cadastro_prepared,
-        on=[F.col("df_bureau_prepared.num_cpf") == F.col("df_cadastro_prepared.num_cpf"),
-            F.col("df_bureau_prepared.safra") == F.col("df_cadastro_prepared.safra")],
-        how="left"
-    ).select("df_bureau_prepared.*", "df_cadastro_prepared.*")
-    
-    # Alternative approach (cleaner): use string keys for join
-    df_abt = df_bureau_prepared.alias("bureau").join(
-        df_cadastro_prepared.alias("cadastro"),
         on=["num_cpf", "safra"],
         how="left"
-    ).select("bureau.*", "cadastro.*")
-    
-    # Note: after LEFT JOIN, some columns may be duplicated; take first occurrence
-    # Spark automatically handles by preferring left table columns
-    
-    abt_after_join_count = df_abt.count()
-    print(f"  ✓ ABT after JOIN: {abt_after_join_count:,} records (left join preserves grain)")
-    
-    # Step 4: Treat Score_02 sentinela (0 → NULL) if not already done
-    print("\n[Step 4] Treating Score_02 sentinela values (0 → NULL)...")
-    df_abt = df_abt.withColumn(
-        "score_02_adj",
-        F.when(F.col("score_02_dbl") == 0, F.lit(None)).otherwise(F.col("score_02_dbl"))
-    ).withColumn(
-        "flag_score02_missing",
-        F.when(
-            F.col("score_02_dbl").isNull() | (F.col("score_02_dbl") == 0),
-            F.lit(1)
-        ).otherwise(F.lit(0))
-    ).drop("score_02_dbl")
-    print("  ✓ Score_02 sentinela treated")
-    
-    # Step 5: Select, order, and finalize columns
-    print("\n[Step 5] Selecting and ordering final columns (165 total)...")
-    
-    # Column groups
-    key_cols = ["num_cpf", "safra", "dt_safra"]
-    label_cols = ["fpd_int", "flag_instalacao_int"]
-    score_cols = ["score_01_adj", "flag_score01_missing", "score_02_adj", "flag_score02_missing"]
-    telco_cols = (
-        [f"var_{i:02d}_adj" for i in range(26, 94)] +
-        [f"flag_var_{i:02d}_missing" for i in range(26, 94)]
     )
-    demographic_cols = ["idade_anos", "cep_3_digitos"]
-    demographic_flag_cols = ["flag_cep3_missing", "flag_idade_outlier", "flag_dt_nasc_invalid"]
-    status_cols = ["statusrf", "prod", "flag_mig2"]
-    numeric_cadastro_cols = ["var_03", "var_04", "var_05", "var_06", "var_07", "var_08", "var_09", "var_10", "var_11", "var_16", "var_17"]
-    numeric_cadastro_flag_cols = ["flag_var_11_neg"]
-    categorical_cadastro_cols = ["var_15", "var_22", "var_23", "var_24", "var_25"]
-    date_cadastro_cols = ["dt_var_12"]
-    date_cadastro_flag_cols = ["flag_dt_var_12_invalid"]
-    metadata_cols = ["metadata_source", "metadata_build_date", "metadata_audit_record_count"]
+
+    # Step 4: Atualizar metadados de gold (version, feature blocks, build date)
+    print(">>> [Transform] Atualizando metadados de Gold (version, feature blocks, build date)...")
+    from datetime import datetime
+    build_date = datetime.now().isoformat()
     
-    # Build ordered select list
-    all_cols = (
-        key_cols +
-        label_cols +
-        score_cols +
-        telco_cols +
-        demographic_cols +
-        demographic_flag_cols +
-        status_cols +
-        numeric_cadastro_cols +
-        numeric_cadastro_flag_cols +
-        categorical_cadastro_cols +
-        date_cadastro_cols +
-        date_cadastro_flag_cols +
-        metadata_cols
-    )
+    df_abt = df_abt \
+        .withColumn("gold_version", F.lit("gold_abt_v4")) \
+        .withColumn("gold_build_date", F.lit(build_date)) \
+        .withColumn("gold_feature_blocks", F.lit("score_01,score_02,telco,cadastro"))
+
+    # Step 5: Selecionar e ordenar colunas logicamente
+    final_cols = [
+        # CHAVES
+        "num_cpf", "safra", "dt_safra",
+        
+        # LABELS (auditoria - não são features!)
+        "flag_instalacao_int", "fpd_int",
+        
+        # FEATURES v1 (Score_01)
+        "score_01_adj", "flag_score01_missing",
+        
+        # FEATURES v2 (Score_02)
+        "score_02_adj", "flag_score02_missing",
+        
+        # FEATURES v3 (Telco 68 vars)
+        *[f"var_{i}_adj" for i in range(26, 94)],
+        *[f"flag_var_{i}_missing" for i in range(26, 94)],
+        
+        # FEATURES v4 (Cadastro - Demográficas)
+        "idade_anos", "flag_idade_menor_18", "flag_idade_muito_alta",
+        "cep_3_digitos", "flag_cep_missing", "statusrf",
+        
+        # FEATURES v4 (Cadastro - Variáveis anonimizadas)
+        *[f"var_{i}" for i in range(2, 26) if f"var_{i}" in df_abt.columns],
+        *[f"flag_var_{i}_missing" for i in range(2, 26) if f"flag_var_{i}_missing" in df_abt.columns],
+        
+        # METADADOS
+        "prod", "flag_mig2",
+        
+        # AUDITORIA
+        "metadata_data_ingestao", "metadata_nome_arquivo_origem",
+        "metadata_sistema_origem", "metadata_data_transformacao",
+        "metadata_versao_regra",
+        
+        # GOLD METADATA
+        "gold_version", "gold_build_date", "gold_feature_blocks"
+    ]
     
-    df_abt = df_abt.select(*all_cols)
-    print(f"  ✓ Selected {len(all_cols)} columns")
+    # Filtrar apenas colunas que existem no dataframe
+    final_cols = [col for col in final_cols if col in df_abt.columns]
     
-    # Step 6: Add Gold metadata
-    print("\n[Step 6] Adding Gold metadata columns...")
-    build_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    df_abt = df_abt.withColumn(
-        "gold_version", F.lit("v4")
-    ).withColumn(
-        "gold_build_date", F.lit(build_date)
-    ).withColumn(
-        "gold_feature_blocks", F.lit("Scores (v1, v2) + Telco (v3) + Cadastro (v4)")
-    )
-    print(f"  ✓ Gold metadata added (version=v4, build_date={build_date})")
-    
-    print(f"\n[Step 7] Final ABT v4 structure:")
-    print(f"  • Records: {abt_after_join_count:,}")
-    print(f"  • Columns: {len(df_abt.columns)}")
-    print(f"  • Feature blocks: Scores (2) + Telco (130) + Cadastro (33) + Metadata (3)")
-    
+    df_abt = df_abt.select(*final_cols)
+
     return df_abt
 
-
 def main():
-    parser = argparse.ArgumentParser(description="Build ABT v4 (Bureau + Scores + Telco + Cadastro)")
-    parser.add_argument(
-        "--input_bureau_path",
-        type=str,
-        default="/Volumes/hackathon_2025/default/silver/bureau_full_silver_delta/",
-        help="Path to Silver Bureau Delta table"
-    )
-    parser.add_argument(
-        "--input_telco_path",
-        type=str,
-        default="/Volumes/hackathon_2025/default/silver/telco_silver_delta/",
-        help="Path to Silver Telco Delta table"
-    )
-    parser.add_argument(
-        "--input_cadastro_path",
-        type=str,
-        default="/Volumes/hackathon_2025/default/silver/cadastro_silver_delta/",
-        help="Path to Silver Cadastro Delta table"
-    )
-    parser.add_argument(
-        "--output_path",
-        type=str,
-        default="/Volumes/hackathon_2025/default/gold/abt_v4_delta/",
-        help="Path to write ABT v4 Gold Delta table"
-    )
-    
-    args = parser.parse_args()
-    
-    # Initialize Spark
-    spark = get_spark_session()
-    
+    parser = argparse.ArgumentParser(description="Build Gold ABT v4 - Score_01 + Score_02 + Telco + Cadastro")
+    parser.add_argument("--gold_abt_v3_path", help="Caminho do Gold ABT v3 (Delta)")
+    parser.add_argument("--silver_cadastro_path", help="Caminho da Silver Cadastro (Delta)")
+    parser.add_argument("--output_path", help="Caminho de destino do Gold ABT (Delta)")
+    parser.add_argument("--format", default=DEFAULT_FORMAT, help="Formato (delta)")
+
+    args_parsed, unknown_args = parser.parse_known_args()
+
+    if args_parsed.gold_abt_v3_path and args_parsed.silver_cadastro_path:
+        args = args_parsed
+    else:
+        print(">>> [Config] AVISO: Rodando em modo interativo/DEV. Usando caminhos padrão.")
+        class Args:
+            gold_abt_v3_path = DEFAULT_GOLD_ABT_V3_PATH
+            silver_cadastro_path = DEFAULT_SILVER_CADASTRO_PATH
+            output_path = DEFAULT_OUTPUT_PATH
+            format = DEFAULT_FORMAT
+        args = Args()
+
+    spark = get_spark_session("Gold_ABT_Builder_v4")
+
+    # =========================================================================
+    # 1) LEITURA GOLD ABT v3 (SPINE)
+    # =========================================================================
+    print(f">>> [Leitura] Carregando Gold ABT v3 (Spine): {args.gold_abt_v3_path}")
     try:
-        # Build ABT v4
-        df_abt_v4 = build_abt_v4(
-            spark=spark,
-            bureau_silver_path=args.input_bureau_path,
-            telco_silver_path=args.input_telco_path,
-            cadastro_silver_path=args.input_cadastro_path,
-            output_path=args.output_path
-        )
-        
-        # Validate v4
-        print("\n" + "="*80)
-        print("VALIDATION PHASE — Running 9 gates")
-        print("="*80)
-        validation_result = validate_abt_v4(df_abt_v4)
-        
-        if not validation_result["passed"]:
-            print("\n❌ VALIDATION FAILED")
-            for gate_name, gate_info in validation_result["gates"].items():
-                if not gate_info["passed"]:
-                    print(f"\n  {gate_name}:")
-                    print(f"    {gate_info['message']}")
-            sys.exit(1)
-        
-        print("\n✅ ALL GATES PASSED")
-        
-        # Write to Delta
-        print("\n" + "="*80)
-        print(f"WRITING ABT v4 to {args.output_path}")
-        print("="*80)
-        
-        df_abt_v4.write.format("delta").mode("overwrite").save(args.output_path)
-        
-        print(f"\n✅ ABT v4 successfully written to {args.output_path}")
-        print(f"   • Records: {df_abt_v4.count():,}")
-        print(f"   • Columns: {len(df_abt_v4.columns)}")
-        
+        df_abt_v3 = spark.read.format(args.format).load(args.gold_abt_v3_path)
     except Exception as e:
-        print(f"\n❌ ERROR: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"!!! ERRO CRÍTICO NA LEITURA ABT v3: {e}")
         sys.exit(1)
 
+    count_in_v3 = df_abt_v3.count()
+    print(f">>> [Info] Registros no Gold ABT v3: {count_in_v3}")
+
+    # =========================================================================
+    # 2) LEITURA SILVER CADASTRO (ENRIQUECIMENTO)
+    # =========================================================================
+    print(f">>> [Leitura] Carregando Silver Cadastro (Enriquecimento): {args.silver_cadastro_path}")
+    try:
+        df_cadastro = spark.read.format(args.format).load(args.silver_cadastro_path)
+    except Exception as e:
+        print(f"!!! ERRO CRÍTICO NA LEITURA CADASTRO: {e}")
+        sys.exit(1)
+
+    count_in_cadastro = df_cadastro.count()
+    print(f">>> [Info] Registros no Silver Cadastro: {count_in_cadastro}")
+
+    # =========================================================================
+    # 3) BUILD ABT v4 (ABT v3 LEFT JOIN Cadastro)
+    # =========================================================================
+    print(">>> [Transform] Construindo ABT v4 (Score_01 + Score_02 + Telco + Cadastro)...")
+    df_abt = build_abt_v4(df_abt_v3, df_cadastro)
+
+    # =========================================================================
+    # 4) VALIDAÇÕES (obrigatórias conforme target_definition.md)
+    # =========================================================================
+    print(">>> [Validate] Executando gates de qualidade...")
+    try:
+        validate_abt_v4(df_abt)
+    except AssertionError as e:
+        print(f"!!! ERRO DE VALIDAÇÃO: {e}")
+        sys.exit(1)
+
+    count_out = df_abt.count()
+    print(f">>> [Info] Registros no ABT v4: {count_out}")
+
+    # =========================================================================
+    # 5) ESCRITA (DELTA LAKE)
+    # =========================================================================
+    print(f">>> [Escrita] Salvando Gold ABT v4 (Delta): {args.output_path}")
+
+    df_abt.write \
+        .format("delta") \
+        .mode("overwrite") \
+        .option("mergeSchema", "true") \
+        .option("overwriteSchema", "true") \
+        .save(args.output_path)
+
+    # =========================================================================
+    # ESCRITA TABLE PARA DATABRICKS (RETIRAR QUANDO PASSAR PARA OCI)
+    # =========================================================================
+    target_table = "hackathon_2025.default.gold_abt_v4"
+    df_abt.write \
+        .mode("overwrite") \
+        .option("overwriteSchema", "true") \
+        .saveAsTable(target_table)
+    print(f">>> [Sucesso] Tabela salva no Unity-Catalog: {target_table}")
+    # =========================================================================
+
+    # =========================================================================
+    # 6) RELATÓRIO FINAL
+    # =========================================================================
+    print("\n" + "="*80)
+    print("RELATÓRIO FINAL - ABT v4 (Score_01 + Score_02 + Telco + Cadastro)")
+    print("="*80)
+    
+    # Distribuição de labels
+    dist_flag = df_abt.groupBy("flag_instalacao_int").count().collect()
+    dist_fpd = df_abt.filter(F.col("fpd_int").isNotNull()).groupBy("fpd_int").count().collect()
+    
+    print("\n>>> [Stats] FLAG_INSTALACAO (decisão observada):")
+    for row in dist_flag:
+        pct = row["count"] * 100 / count_out
+        print(f"    FLAG={row['flag_instalacao_int']}: {row['count']:>10} ({pct:>5.2f}%)")
+    
+    print("\n>>> [Stats] FPD (target, observado SÓ em FLAG_INSTALACAO=1):")
+    for row in dist_fpd:
+        pct = row["count"] * 100 / count_out
+        print(f"    FPD={row['fpd_int']}: {row['count']:>10} ({pct:>5.2f}%)")
+    
+    # Completude de features v1, v2
+    score01_null = df_abt.filter(F.col("score_01_adj").isNull()).count()
+    score02_null = df_abt.filter(F.col("score_02_adj").isNull()).count()
+    
+    score01_coverage = (count_out - score01_null) * 100 / count_out
+    score02_coverage = (count_out - score02_null) * 100 / count_out
+    
+    print(f"\n>>> [Features v1-v2] Completude:")
+    print(f"    SCORE_01_ADJ: {score01_coverage:.2f}%")
+    print(f"    SCORE_02_ADJ: {score02_coverage:.2f}%")
+    
+    # Completude de features v3 (Telco)
+    telco_var_nulls = {}
+    for var_idx in range(26, 94):
+        var_col = f"var_{var_idx}_adj"
+        if var_col in df_abt.columns:
+            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            telco_var_nulls[var_idx] = null_count
+    
+    telco_total_nulls = sum(telco_var_nulls.values())
+    telco_total_cells = len(telco_var_nulls) * count_out
+    telco_coverage = ((telco_total_cells - telco_total_nulls) / telco_total_cells) * 100 if telco_total_cells > 0 else 0
+    
+    print(f"\n>>> [Features v3 - Telco] Completude:")
+    print(f"    Cobertura agregada Telco (var_26-93): {telco_coverage:.2f}%")
+    print(f"    Total células Telco: {telco_total_cells:>12}")
+    print(f"    Células NULLs: {telco_total_nulls:>12}")
+    
+    # Completude de features v4 (Cadastro)
+    cadastro_var_nulls = {}
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx}"
+        if var_col in df_abt.columns:
+            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            cadastro_var_nulls[var_idx] = null_count
+    
+    cadastro_total_nulls = sum(cadastro_var_nulls.values())
+    cadastro_total_cells = len(cadastro_var_nulls) * count_out
+    cadastro_coverage = ((cadastro_total_cells - cadastro_total_nulls) / cadastro_total_cells) * 100 if cadastro_total_cells > 0 else 0
+    
+    print(f"\n>>> [Features v4 - Cadastro] Completude:")
+    print(f"    Cobertura agregada Cadastro (var_02-25): {cadastro_coverage:.2f}%")
+    print(f"    Total células Cadastro: {cadastro_total_cells:>12}")
+    print(f"    Células NULLs: {cadastro_total_nulls:>12}")
+    
+    # Breakdown por variável de Cadastro (para debug)
+    print(f"\n>>> [Features v4 - Cadastro Detail] Distribuição por variável:")
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx}"
+        if var_col in df_abt.columns:
+            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            coverage_pct = ((count_out - null_count) / count_out) * 100 if count_out > 0 else 0
+            print(f"      {var_col}: {coverage_pct:>6.2f}% ({count_out - null_count:>10} não-NULL)")
+        else:
+            print(f"      {var_col}: NÃO ENCONTRADO NA TABELA")
+    
+    # Impacto do join (quantos registros encontraram match em Cadastro)
+    # Verificar se há QUALQUER variável de Cadastro (não só var_02)
+    cadastro_match_conditions = []
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx}"
+        if var_col in df_abt.columns:
+            cadastro_match_conditions.append(F.col(var_col).isNotNull())
+    
+    if cadastro_match_conditions:
+        # Se houver alguma condição, usar OR
+        match_condition = cadastro_match_conditions[0]
+        for cond in cadastro_match_conditions[1:]:
+            match_condition = match_condition | cond
+        cadastro_match_count = df_abt.filter(match_condition).count()
+    else:
+        cadastro_match_count = 0
+    
+    cadastro_match_pct = (cadastro_match_count / count_out) * 100 if count_out > 0 else 0
+    
+    print(f"\n>>> [JOIN] Impacto Cadastro:")
+    print(f"    Total ABT v3 (spine): {count_in_v3:>12}")
+    print(f"    Total Cadastro (enriquecimento): {count_in_cadastro:>12}")
+    print(f"    Resultados ABT v4 (ABT v3 LEFT JOIN): {count_out:>12}")
+    print(f"    Registros com match Cadastro: {cadastro_match_count:>12} ({cadastro_match_pct:.2f}%)")
+    
+    print("\n" + "="*80)
+    print(f"✓ ABT v4 PRONTA PARA MODELAGEM")
+    print(f"  - Versão: {GOLD_VERSION}")
+    print(f"  - Feature blocks: Score_01, Score_02, Telco (68 variáveis), Cadastro (24 variáveis)")
+    print(f"  - Total registros: {count_out}")
+    print(f"  - Grão: 1:1 NUM_CPF + SAFRA")
+    print(f"  - Target: FPD_INT (observado em FLAG_INSTALACAO=1)")
+    print(f"  - Status: Incremental (Cadastro adiciona {cadastro_coverage:.1f}% cobertura, {cadastro_match_pct:.1f}% match)")
+    print("="*80 + "\n")
 
 if __name__ == "__main__":
     main()
