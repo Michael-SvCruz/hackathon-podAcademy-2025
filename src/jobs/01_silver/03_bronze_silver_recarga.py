@@ -157,13 +157,16 @@ def build_silver(df_bronze):
             )
 
     # 4) Tratamento de sentinelas em códigos dimensionais (-1/-2/-3)
+    # Nota: colunas dimensionais podem ter valores não-numéricos (ex: "PE", "MG")
+    # Usar expr com try_cast (SQL function) para tolerar valores malformados (retorna NULL)
     print(">>> [Transform] Tratando sentinelas em códigos dimensionais...")
     
     for cod_col in CODIGO_COLUMNS:
         if cod_col in df.columns:
+            # Usar SQL try_cast via F.expr para ser tolerante com valores não-numéricos
             df = (
                 df
-                .withColumn(cod_col, F.col(cod_col).cast("int"))
+                .withColumn(cod_col, F.expr(f"try_cast({cod_col} as int)"))
                 .withColumn(
                     f"flag_{cod_col}_sentinela",
                     F.when(F.col(cod_col).isin(*SENTINELAS), 1).otherwise(0)
