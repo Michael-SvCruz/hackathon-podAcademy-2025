@@ -128,9 +128,24 @@ python src/jobs/02_gold/00_gold_abt_builder.py
 4. **Missing validation gates:** Gate failures indicate data quality issues, not code bugs
 5. **Hardcoded paths:** Use defaults in `settings.py` or parameterize via argparse
 
+## � Project Context & Meetings
+
+The `informacoes_adicionais/` folder contains critical meeting transcripts that provide business context for the hackathon:
+- **00_reuniao_apresentacao-hackathon-2025.pdf** — Initial project presentation & objectives
+- **01_reuniao_tira-duvidas-claro-gustavoLenin-20260107.pdf** — Q&A session with Claro stakeholder (Gustavo Lenin) clarifying data availability and business rules
+- **Agenda Hackathon 2025 - 15.12.2025.pptx.pdf** — Hackathon schedule and team structure
+- **check_point_20260115.pdf** — Latest progress checkpoint meeting (Jan 15, 2026)
+
+**When to reference these meetings:**
+- Making architectural decisions or roadmap changes
+- Evaluating feature priorities and data source additions (v4+)
+- Clarifying business constraints or stakeholder requirements
+- Assessing feasibility of proposed transformations
+
 ## 📚 When in Doubt
 
 - Check `docs/04_gold_rules/00_QUICK_START.md` for hands-on examples
 - Review [validate_abt.py](src/jobs/02_gold/validators/validate_abt.py) for gate patterns
 - See [IMPLEMENTATION_SUMMARY.txt](IMPLEMENTATION_SUMMARY.txt) for current status
 - Trace column lineage via metadata columns: `metadata_*` and `gold_*`
+- Reference `informacoes_adicionais/` folder for business context and stakeholder requirements

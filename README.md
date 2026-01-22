@@ -38,8 +38,8 @@ GOLD (ABTs para Modelagem)
     ├── abt_v1_delta/              ✅ PRONTO (Score_01)
     ├── abt_v2_delta/              ✅ PRONTO (+ Score_02)
     ├── abt_v3_delta/              ✅ PRONTO (+ Telco 68 vars)
-    ├── abt_v4_delta/              ⏳ PRÓXIMO (+ Cadastro)
-    ├── abt_v5_delta/              ⏳ (+ Recarga)
+    ├── abt_v4_delta/              ✅ PRONTO (+ Cadastro 33 vars)
+    ├── abt_v5_delta/              ⏳ PRÓXIMO (+ Recarga)
     └── abt_v6_delta/              ⏳ (+ Pagamento + Atraso)
 ```
 
@@ -117,6 +117,14 @@ GOLD (ABTs para Modelagem)
 | **Validator** | `validators/validate_abt.py::validate_abt_v3()` | ✅ | 8 gates (v2 + Gate 8 Telco) |
 | **Docs Técnicas** | `docs/04_gold_rules/abt_v3.md` | ✅ | Especificação formal |
 
+**v4 - Score_01 + Score_02 + Telco + Cadastro (NOVO):**
+
+| Componente | Arquivo | Status | Descrição |
+|------------|---------|--------|-----------|
+| **Builder** | `03_gold_abt_v4_builder.py` | ✅ | Estende v3 com Cadastro (33 vars) |
+| **Validator** | `validators/validate_abt.py::validate_abt_v4()` | ✅ | 9 gates (v3 + Gate 9 Cadastro) |
+| **Docs Técnicas** | `docs/04_gold_rules/abt_v4.md` | ✅ | Especificação formal |
+
 **Localização:** `src/jobs/02_gold/`
 
 **ABT v1 Estrutura:**
@@ -170,31 +178,32 @@ Metadados:
 | Versão | Features | Status | KS Esperado | Próximas Ações |
 |--------|----------|--------|------------|---|
 | **v1** | Score_01 | ✅ PRONTO | ≈ 33,1 | Treinar modelo, medir KS |
-| **v2** | + Score_02 | ✅ PRONTO | ΔKS = ? | Treinar, medir ΔKS vs v1 |
-| **v3** | + Telco (var_26-93) | ✅ PRONTO | ΔKS = ? | Treinar, medir ΔKS vs v2 |
-| **v4** | + Cadastro | ⏳ Próximo | ΔKS = ? | Criar 03_gold_abt_v4_builder.py |
-| **v5** | + Recarga | ⏳ | ΔKS = ? | Agregar events Recarga |
-| **v6** | + Pagamento + Atraso | ⏳ | ΔKS = ? | Agregar events Pag/Atraso |
+| **v2** | + Score_02 | ✅ PRONTO | ≈ 34.5 | Treinar, medir ΔKS vs v1 |
+| **v3** | + Telco (var_26-93) | ✅ PRONTO | ≈ 36.0 | Treinar, medir ΔKS vs v2 |
+| **v4** | + Cadastro (33 vars) | ✅ PRONTO | ≈ 37.0 | Treinar, medir ΔKS vs v3 |
+| **v5** | + Recarga | ⏳ Próximo | ≈ 37.5+ | Agregar events Recarga |
+| **v6** | + Pagamento + Atraso | ⏳ | ≈ 38.0+ | Agregar events Pag/Atraso |
 
 ---
 
 ## 🚀 Como Usar
 
-### **Executar Gold v1, v2, ou v3**
+### **Executar Gold v1, v2, v3, ou v4**
 
 ```bash
 # Opção 1: Databricks Notebook
-%run /Workspace/src/jobs/02_gold/00_gold_abt_builder.py       # v1
-%run /Workspace/src/jobs/02_gold/01_gold_abt_v2_builder.py    # v2
-%run /Workspace/src/jobs/02_gold/02_gold_abt_v3_builder.py    # v3
+%run /Workspace/src/jobs/02_gold/00_gold_abt_builder.py       # v1 (Score_01)
+%run /Workspace/src/jobs/02_gold/01_gold_abt_v2_builder.py    # v2 (+ Score_02)
+%run /Workspace/src/jobs/02_gold/02_gold_abt_v3_builder.py    # v3 (+ Telco)
+%run /Workspace/src/jobs/02_gold/03_gold_abt_v4_builder.py    # v4 (+ Cadastro)
 
-# Opção 2: Spark Submit (exemplo v3)
+# Opção 2: Spark Submit (exemplo v4)
 spark-submit \
   --py-files src/ \
-  src/jobs/02_gold/02_gold_abt_v3_builder.py
+  src/jobs/02_gold/03_gold_abt_v4_builder.py
 
 # Opção 3: Python direto
-python src/jobs/02_gold/02_gold_abt_v3_builder.py
+python src/jobs/02_gold/03_gold_abt_v4_builder.py
 ```
 
 ### **Saída Esperada**
