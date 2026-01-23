@@ -64,7 +64,7 @@ import argparse
 from pyspark.sql import functions as F
 
 from src.utils.spark_utils import get_spark_session
-from validators.validate_abt import validate_abt_v4
+from src.utils.validate_abt import validate_abt_v4
 
 # =============================================================================
 # CONFIGURAÇÃO PADRÃO (DESENVOLVIMENTO / DATABRICKS COMMUNITY)
