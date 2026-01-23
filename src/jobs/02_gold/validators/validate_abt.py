@@ -953,7 +953,9 @@ def validate_abt_v5(df_abt, count_v4):
         F.max(F.col("qtd_recargas_m1")).alias("max_qty"),
         F.avg(F.col("qtd_recargas_m1")).alias("avg_qty"),
         F.count(F.when(F.isnan(F.col("qtd_recargas_m1")), 1)).alias("nan_count"),
-        F.count(F.when(F.isinf(F.col("qtd_recargas_m1")), 1)).alias("inf_count")
+        # PySpark não tem isinf(), verificar infs manualmente
+        F.count(F.when((F.col("qtd_recargas_m1") == F.lit(float('inf'))) | 
+                       (F.col("qtd_recargas_m1") == F.lit(float('-inf'))), 1)).alias("inf_count")
     ).collect()[0]
     
     nan_count = qtd_stats["nan_count"] if qtd_stats["nan_count"] else 0

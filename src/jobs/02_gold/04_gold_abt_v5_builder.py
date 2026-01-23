@@ -125,14 +125,14 @@ TEMPORAL_WINDOWS = {
 
 # =============================================================================
 
-def aggregate_recarga_temporal(df_recarga, ref_date_col="dt_safra"):
+def aggregate_recarga_temporal(df_abt_v4, df_recarga):
     """
     Agrega eventos de Recarga para cliente-mês com windows temporais M1/M3/M6.
     
     Inputs:
+    - df_abt_v4: Gold ABT v4 com NUM_CPF, SAFRA, DT_SAFRA (referência temporal)
     - df_recarga: Silver Recarga com NUM_CPF, SAFRA, SAFRA_RECARGA, DT_RECARGA, 
                   valores monetários (*_clean), dimensões
-    - ref_date_col: Coluna de referência no ABT (default "dt_safra")
     
     Outputs:
     - Agregações por (NUM_CPF, SAFRA) para M1/M3/M6:
@@ -142,18 +142,21 @@ def aggregate_recarga_temporal(df_recarga, ref_date_col="dt_safra"):
       * SUM_VAL_CREDITO_INSERIDO_CLEAN_M*
       * AVG_VAL_REAL_CLEAN_M*
       * FLAG_TEVE_SOS_M*
-      * [Opcionais] Por dimensão boa
     
-    Nota: SAFRA_RECARGA já está em formato YYYYMM; conversão para DATE (primeiro dia)
-          antes de comparação temporal.
+    Nota: Usa DT_SAFRA do ABT v4 como referência temporal (cliente-mês)
+          Filtra eventos Recarga por SAFRA_RECARGA em M1/M3/M6 lookback windows
     """
     print(">>> [Transform] Agregando Recarga para temporal windows M1/M3/M6...")
 
     # Preparar: garantir SAFRA_RECARGA em formato DATE (primeiro dia do mês)
+    # Exemplo: SAFRA_RECARGA = "202406" → DT_RECARGA_SAFRA = 2024-06-01
     df_rec = df_recarga.withColumn(
         "dt_recarga_safra",
         F.to_date(F.concat_ws("-", F.col("safra_recarga"), F.lit("01")), "yyyyMM-dd")
     )
+
+    # Preparar ABT v4: selecionar apenas chaves + DT_SAFRA
+    df_abt_dates = df_abt_v4.select("num_cpf", "safra", "dt_safra").distinct()
 
     # Inicializar agregação: criar chaves de cliente-mês
     agg_dict = {}
@@ -162,17 +165,28 @@ def aggregate_recarga_temporal(df_recarga, ref_date_col="dt_safra"):
     for window_name, num_months in TEMPORAL_WINDOWS.items():
         print(f"    → Agregando {window_name} ({num_months} mês(es))...")
         
+        # JOIN Recarga com ABT v4 (apenas por num_cpf para pegar todos os eventos do cliente)
+        # Depois filtramos por janela temporal usando dt_safra como referência
+        df_with_dates = df_rec.join(
+            df_abt_dates,
+            on=["num_cpf"],
+            how="inner"
+        )
+        
         # Filtrar eventos dentro da janela temporal
-        df_window = df_rec.withColumn(
+        # Nota: safra_recarga em Recarga corresponde a dt_recarga_safra
+        #       dt_safra em ABT é a referência (primeiro dia do mês do cliente-mês)
+        df_window = df_with_dates.withColumn(
             f"is_in_{window_name}",
             F.when(
-                (F.col("dt_recarga_safra") >= F.add_months(F.col(ref_date_col), -num_months)) &
-                (F.col("dt_recarga_safra") < F.col(ref_date_col)),
+                (F.col("dt_recarga_safra") >= F.add_months(F.col("dt_safra"), -num_months)) &
+                (F.col("dt_recarga_safra") < F.col("dt_safra")),
                 1
             ).otherwise(0)
         )
 
         # Agregações básicas (quantidade, somas, médias)
+        # Preserva safra para posterior join com ABT v4
         df_agg_basic = df_window \
             .filter(F.col(f"is_in_{window_name}") == 1) \
             .groupBy("num_cpf", "safra") \
@@ -187,16 +201,16 @@ def aggregate_recarga_temporal(df_recarga, ref_date_col="dt_safra"):
         
         agg_dict[window_name] = df_agg_basic
 
-    # Combinar todas as janelas temporais em um único DF
+    # Combinar todas as janelas temporais em um único DF (LEFT JOINs para manter todos os cliente-mês)
     df_agg_recarga = agg_dict["M1"]
     for window_name in ["M3", "M6"]:
         df_agg_recarga = df_agg_recarga.join(
             agg_dict[window_name],
             on=["num_cpf", "safra"],
-            how="inner"  # Inner porque todos devem ter M1/M3/M6 (preenchidos com 0 se vazio)
+            how="left"  # LEFT para manter M1 como base, mesmo se M3/M6 estiverem vazios
         )
 
-    # Preencher NULLs com 0 (para clientes sem recarga)
+    # Preencher NULLs com 0 (para clientes sem recarga em cada período)
     for window_name in TEMPORAL_WINDOWS.keys():
         w_lower = window_name.lower()
         df_agg_recarga = df_agg_recarga \
@@ -204,6 +218,7 @@ def aggregate_recarga_temporal(df_recarga, ref_date_col="dt_safra"):
             .withColumn(f"sum_val_real_clean_{w_lower}", F.coalesce(F.col(f"sum_val_real_clean_{w_lower}"), F.lit(0.0))) \
             .withColumn(f"sum_val_bonus_clean_{w_lower}", F.coalesce(F.col(f"sum_val_bonus_clean_{w_lower}"), F.lit(0.0))) \
             .withColumn(f"sum_val_credito_inserido_clean_{w_lower}", F.coalesce(F.col(f"sum_val_credito_inserido_clean_{w_lower}"), F.lit(0.0))) \
+            .withColumn(f"avg_val_real_clean_{w_lower}", F.coalesce(F.col(f"avg_val_real_clean_{w_lower}"), F.lit(0.0))) \
             .withColumn(f"flag_teve_sos_{w_lower}", F.coalesce(F.col(f"flag_teve_sos_{w_lower}"), F.lit(0)))
 
     return df_agg_recarga
@@ -237,8 +252,8 @@ def build_abt_v5(df_abt_v4, df_recarga):
     """
     print(">>> [Transform] JOIN ABT v4 + Recarga (agregada) para ABT v5...")
 
-    # Step 1: Agregar Recarga
-    df_recarga_agg = aggregate_recarga_temporal(df_recarga, ref_date_col="dt_safra")
+    # Step 1: Agregar Recarga (passa v4 para ter contexto de dt_safra)
+    df_recarga_agg = aggregate_recarga_temporal(df_abt_v4, df_recarga)
 
     # Step 2: LEFT JOIN ABT v4 com Recarga agregada
     df_abt_v5 = df_abt_v4.join(
