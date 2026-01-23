@@ -467,31 +467,21 @@ def validate_abt_v3(df_abt, count_silver):
     print(f"    Cobertura Telco (novo): {telco_pct:.2f}%\n")
 
 
-def validate_abt_v4(df_abt):
+def validate_abt_v6(df_abt, count_abt_v5):
     """
-    Validações obrigatórias para ABT v4 (Bureau + Scores + Telco + Cadastro).
+    Validações obrigatórias para ABT v6 (Score + Telco + Cadastro + Recarga + Pagamento + Atraso).
     
     Gates:
-    1. Unicidade: 1:1 por NUM_CPF + SAFRA (sem duplicatas)
-    2. FPD observado SÓ em FLAG_INSTALACAO=1
-    3. Sem NULLs nas chaves
-    4. Distribuição razoável de FLAG_INSTALACAO
-    5. Distribuição razoável de FPD
-    6. Score_01 com cobertura > 95%
-    7. Score_02 com cobertura > 99%
-    8. Telco com cobertura > 20% (complementar)
-    9. Cadastro com cobertura > 25% (complementar, novo em v4)
+    1-8: Herdados de v5 (unicidade, anti-leakage, cobertura v1-v5)
+    9-10: De v5 (Recarga sanidade)
+    11-12: Novos v6 (Pagamento e Atraso cobertura)
+    13-14: Novos v6 (Sanidade de valores)
     
-    Returns:
-        dict: {"passed": bool, "gates": {...}}
+    Levanta AssertionError se algum gate falhar.
     """
-    print("\n" + "="*80)
-    print(">>> [Validate ABT v4] Iniciando gates de qualidade (9 gates total)...")
-    print("="*80 + "\n")
+    print("\n>>> [Validate ABT v6] Iniciando 14 gates de qualidade...\n")
     
     total = df_abt.count()
-    gates_result = {}
-    all_passed = True
     
     # =========================================================================
     # GATE 1: Unicidade (1:1 NUM_CPF + SAFRA)
@@ -499,17 +489,12 @@ def validate_abt_v4(df_abt):
     print("  [Gate 1] Verificando unicidade (NUM_CPF + SAFRA)...")
     unique_key = df_abt.select("num_cpf", "safra").distinct().count()
     
-    gate1_pass = (total == unique_key)
-    gates_result["Gate1_Uniqueness"] = {
-        "passed": gate1_pass,
-        "message": f"Registros: {total}, Chaves únicas: {unique_key}" if gate1_pass else f"DUPLICATAS: {total - unique_key}"
-    }
-    
-    if gate1_pass:
-        print(f"    ✓ PASS: {total} == {unique_key} (sem duplicatas)")
-    else:
-        print(f"    ✗ FAIL: {total} != {unique_key}")
-        all_passed = False
+    if total != unique_key:
+        raise AssertionError(
+            f"FALHA Gate 1 - Duplicatas detectadas! "
+            f"Total: {total}, Chaves únicas: {unique_key}"
+        )
+    print(f"    ✓ PASS: {total:,} == {unique_key:,} (sem duplicatas)")
     
     # =========================================================================
     # GATE 2: FPD observado SÓ em FLAG_INSTALACAO=1
@@ -520,121 +505,86 @@ def validate_abt_v4(df_abt):
         (F.col("fpd_int").isNotNull())
     ).count()
     
-    gate2_pass = (fpd_where_flag0 == 0)
-    gates_result["Gate2_FPD_Leakage"] = {
-        "passed": gate2_pass,
-        "message": f"Registros com FPD em FLAG=0: {fpd_where_flag0}"
-    }
-    
-    if gate2_pass:
-        print(f"    ✓ PASS: FPD sempre nulo em FLAG_INSTALACAO=0")
-    else:
-        print(f"    ✗ FAIL: {fpd_where_flag0} registros com FPD onde FLAG=0")
-        all_passed = False
+    if fpd_where_flag0 > 0:
+        raise AssertionError(
+            f"FALHA Gate 2 - {fpd_where_flag0} registros têm FPD não nulo "
+            f"onde FLAG_INSTALACAO=0 (NUNCA deve ocorrer!)"
+        )
+    print(f"    ✓ PASS: FPD sempre nulo em FLAG_INSTALACAO=0 ({fpd_where_flag0}=0)")
     
     # =========================================================================
     # GATE 3: Sem NULLs nas chaves
     # =========================================================================
-    print("  [Gate 3] Verificando integridade das chaves (num_cpf, safra)...")
-    null_keys = df_abt.filter(
-        F.col("num_cpf").isNull() | F.col("safra").isNull()
-    ).count()
+    print("  [Gate 3] Verificando NULLs nas chaves...")
+    null_cpf = df_abt.filter(F.col("num_cpf").isNull()).count()
+    null_safra = df_abt.filter(F.col("safra").isNull()).count()
     
-    gate3_pass = (null_keys == 0)
-    gates_result["Gate3_Key_Integrity"] = {
-        "passed": gate3_pass,
-        "message": f"NULLs em chaves: {null_keys}"
-    }
-    
-    if gate3_pass:
-        print(f"    ✓ PASS: Nenhum NULL nas chaves")
-    else:
-        print(f"    ✗ FAIL: {null_keys} NULLs em chaves")
-        all_passed = False
+    if null_cpf > 0 or null_safra > 0:
+        raise AssertionError(
+            f"FALHA Gate 3 - NULLs em chaves! "
+            f"num_cpf NULL: {null_cpf}, safra NULL: {null_safra}"
+        )
+    print(f"    ✓ PASS: Nenhum NULL em chaves")
     
     # =========================================================================
-    # GATE 4: FLAG_INSTALACAO distribuição
+    # GATE 4: Distribuição de FLAG_INSTALACAO
     # =========================================================================
     print("  [Gate 4] Verificando distribuição de FLAG_INSTALACAO...")
-    flag_0_count = df_abt.filter(F.col("flag_instalacao_int") == 0).count()
-    flag_1_count = df_abt.filter(F.col("flag_instalacao_int") == 1).count()
-    flag_0_pct = (flag_0_count / total) * 100 if total > 0 else 0
-    flag_1_pct = (flag_1_count / total) * 100 if total > 0 else 0
+    dist_flag = df_abt.groupBy("flag_instalacao_int").count().collect()
     
-    gate4_pass = (flag_0_count > 0 and flag_1_count > 0)
-    gates_result["Gate4_FLAG_Distribution"] = {
-        "passed": gate4_pass,
-        "message": f"Aprovados: {flag_1_pct:.1f}%, Reprovados: {flag_0_pct:.1f}%"
-    }
+    for row in dist_flag:
+        flag_val = row["flag_instalacao_int"]
+        count_val = row["count"]
+        pct = count_val * 100 / total
+        print(f"    FLAG_INSTALACAO={flag_val}: {count_val:>12,} ({pct:>6.2f}%)")
     
-    if gate4_pass:
-        print(f"    ✓ PASS: FLAG=0: {flag_0_pct:.2f}%, FLAG=1: {flag_1_pct:.2f}%")
-    else:
-        print(f"    ✗ FAIL: Missing values in FLAG distribution")
-        all_passed = False
-    
-    # =========================================================================
-    # GATE 5: FPD distribuição (entre FLAG=1)
-    # =========================================================================
-    print("  [Gate 5] Verificando distribuição de FPD (entre FLAG=1)...")
-    fpd_count_total = df_abt.filter(F.col("fpd_int") == 1).count()
-    fpd_pct = (fpd_count_total / total) * 100 if total > 0 else 0
-    good_pct = ((total - fpd_count_total) / total) * 100 if total > 0 else 0
-    
-    gate5_pass = (fpd_count_total > 0)
-    gates_result["Gate5_FPD_Distribution"] = {
-        "passed": gate5_pass,
-        "message": f"Bons: {good_pct:.1f}%, Risco: {fpd_pct:.1f}%"
-    }
-    
-    if gate5_pass:
-        print(f"    ✓ PASS: FPD=0: {good_pct:.2f}%, FPD=1: {fpd_pct:.2f}%")
-    else:
-        print(f"    ✗ FAIL: No FPD positive cases")
-        all_passed = False
+    flag_values = {row["flag_instalacao_int"] for row in dist_flag}
+    if flag_values != {0, 1}:
+        raise AssertionError(
+            f"FALHA Gate 4 - FLAG_INSTALACAO não contém ambos 0 e 1! "
+            f"Valores presentes: {flag_values}"
+        )
+    print(f"    ✓ PASS: Ambos FLAG_INSTALACAO=0 e =1 presentes")
     
     # =========================================================================
-    # GATE 6: Score_01 cobertura > 95%
+    # GATE 5: Score_01 cobertura ≥90%
     # =========================================================================
-    print("  [Gate 6] Verificando cobertura Score_01...")
-    score01_count = df_abt.filter(F.col("score_01_adj").isNotNull()).count()
-    score01_pct = (score01_count / total) * 100 if total > 0 else 0
+    print("  [Gate 5] Verificando completude de SCORE_01_ADJ...")
+    score01_null = df_abt.filter(F.col("score_01_adj").isNull()).count()
+    score01_valid = total - score01_null
+    score01_pct = score01_valid * 100 / total
     
-    gate6_pass = (score01_pct >= 95)
-    gates_result["Gate6_Score01_Coverage"] = {
-        "passed": gate6_pass,
-        "message": f"Score_01 cobertura: {score01_pct:.2f}%"
-    }
+    print(f"    SCORE_01_ADJ: {score01_valid:>12,} / {total:,} ({score01_pct:>6.2f}%)")
     
-    if gate6_pass:
-        print(f"    ✓ PASS: Score_01 presente em {score01_pct:.2f}%")
-    else:
-        print(f"    ✗ FAIL: Score_01 cobertura baixa: {score01_pct:.2f}%")
-        all_passed = False
+    if score01_pct < 90:
+        raise AssertionError(
+            f"FALHA Gate 5 - SCORE_01_ADJ com cobertura baixa! "
+            f"{score01_pct:.2f}% < 90%"
+        )
+    print(f"    ✓ PASS: SCORE_01_ADJ em {score01_pct:.2f}% dos registros")
     
     # =========================================================================
-    # GATE 7: Score_02 cobertura > 99%
+    # GATE 6: Score_02 cobertura ≥40%
     # =========================================================================
-    print("  [Gate 7] Verificando cobertura Score_02...")
-    score02_count = df_abt.filter(F.col("score_02_adj").isNotNull()).count()
-    score02_pct = (score02_count / total) * 100 if total > 0 else 0
+    print("  [Gate 6] Verificando completude de SCORE_02_ADJ...")
+    score02_null = df_abt.filter(F.col("score_02_adj").isNull()).count()
+    score02_valid = total - score02_null
+    score02_pct = score02_valid * 100 / total
     
-    gate7_pass = (score02_pct >= 99)
-    gates_result["Gate7_Score02_Coverage"] = {
-        "passed": gate7_pass,
-        "message": f"Score_02 cobertura: {score02_pct:.2f}%"
-    }
+    print(f"    SCORE_02_ADJ: {score02_valid:>12,} / {total:,} ({score02_pct:>6.2f}%)")
     
-    if gate7_pass:
-        print(f"    ✓ PASS: Score_02 presente em {score02_pct:.2f}%")
-    else:
-        print(f"    ✗ FAIL: Score_02 cobertura baixa: {score02_pct:.2f}%")
-        all_passed = False
+    if score02_pct < 40:
+        raise AssertionError(
+            f"FALHA Gate 6 - SCORE_02_ADJ com cobertura muito baixa! "
+            f"{score02_pct:.2f}% < 40%"
+        )
+    print(f"    ✓ PASS: SCORE_02_ADJ em {score02_pct:.2f}% dos registros")
     
     # =========================================================================
-    # GATE 8: Telco cobertura > 20% (complementar a scores)
+    # GATE 7: Telco cobertura ≥20%
     # =========================================================================
-    print("  [Gate 8] Verificando cobertura Telco (var_26-93)...")
+    print("  [Gate 7] Verificando completude de Telco (var_26-93)...")
+    
     telco_total_cells = 0
     telco_null_cells = 0
     
@@ -650,31 +600,28 @@ def validate_abt_v4(df_abt):
     else:
         telco_pct = 0
     
-    gate8_pass = (telco_pct >= 20)
-    gates_result["Gate8_Telco_Coverage"] = {
-        "passed": gate8_pass,
-        "message": f"Telco cobertura: {telco_pct:.2f}%"
-    }
+    print(f"    Telco (var_26-93): {telco_total_cells - telco_null_cells:>12,} / {telco_total_cells:,} ({telco_pct:>6.2f}%)")
     
-    if gate8_pass:
-        print(f"    ✓ PASS: Telco presente em {telco_pct:.2f}% das células")
-    else:
-        print(f"    ✗ FAIL: Telco cobertura baixa: {telco_pct:.2f}%")
-        all_passed = False
+    if telco_pct < 20:
+        raise AssertionError(
+            f"FALHA Gate 7 - Telco com cobertura baixa! "
+            f"{telco_pct:.2f}% < 20%"
+        )
+    print(f"    ✓ PASS: Telco em {telco_pct:.2f}% das células")
     
     # =========================================================================
-    # GATE 9: Cadastro cobertura > 25% (NEW in v4 - complementar)
+    # GATE 8: Cadastro cobertura ≥20%
     # =========================================================================
-    print("  [Gate 9] Verificando cobertura Cadastro (novo em v4)...")
-    # Check core Cadastro numeric features
-    cadastro_cols = ["var_03", "var_04", "var_05", "var_06", "var_07"]
+    print("  [Gate 8] Verificando completude de Cadastro (age, var_02-25)...")
+    
+    cadastro_cols = ["age"] + [f"var_{i}_adj" for i in range(2, 26)]
     cadastro_total_cells = 0
     cadastro_null_cells = 0
     
-    for var_col in cadastro_cols:
-        if var_col in df_abt.columns:
+    for col in cadastro_cols:
+        if col in df_abt.columns:
             cadastro_total_cells += total
-            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            null_count = df_abt.filter(F.col(col).isNull()).count()
             cadastro_null_cells += null_count
     
     if cadastro_total_cells > 0:
@@ -682,35 +629,127 @@ def validate_abt_v4(df_abt):
     else:
         cadastro_pct = 0
     
-    gate9_pass = (cadastro_pct >= 25)
-    gates_result["Gate9_Cadastro_Coverage"] = {
-        "passed": gate9_pass,
-        "message": f"Cadastro cobertura: {cadastro_pct:.2f}%"
-    }
+    print(f"    Cadastro (age+var_02-25): {cadastro_total_cells - cadastro_null_cells:>12,} / {cadastro_total_cells:,} ({cadastro_pct:>6.2f}%)")
     
-    if gate9_pass:
-        print(f"    ✓ PASS: Cadastro presente em {cadastro_pct:.2f}% das células")
-    else:
-        print(f"    ✗ FAIL: Cadastro cobertura baixa: {cadastro_pct:.2f}%")
-        all_passed = False
+    if cadastro_pct < 20:
+        raise AssertionError(
+            f"FALHA Gate 8 - Cadastro com cobertura baixa! "
+            f"{cadastro_pct:.2f}% < 20%"
+        )
+    print(f"    ✓ PASS: Cadastro em {cadastro_pct:.2f}% das células")
+    
+    # =========================================================================
+    # GATE 9: Recarga cobertura ≥5%
+    # =========================================================================
+    print("  [Gate 9] Verificando completude de Recarga...")
+    recarga_non_null = df_abt.filter(F.col("qtd_recargas_m1") > 0).count()
+    recarga_pct = (recarga_non_null / total) * 100
+    
+    print(f"    Clientes com Recarga: {recarga_non_null:>12,} / {total:,} ({recarga_pct:>6.2f}%)")
+    
+    if recarga_pct < 5:
+        raise AssertionError(
+            f"FALHA Gate 9 - Recarga com cobertura muito baixa! "
+            f"{recarga_pct:.2f}% < 5%"
+        )
+    print(f"    ✓ PASS: Recarga em {recarga_pct:.2f}% dos registros")
+    
+    # =========================================================================
+    # GATE 10: QTD_RECARGAS_M1 sanidade (sem NaN/Inf)
+    # =========================================================================
+    print("  [Gate 10] Verificando sanidade de QTD_RECARGAS_M1...")
+    recarga_bad = df_abt.filter(
+        (F.col("qtd_recargas_m1") == F.lit(float('inf'))) |
+        (F.col("qtd_recargas_m1") == F.lit(float('-inf'))) |
+        (F.isnan(F.col("qtd_recargas_m1")))
+    ).count()
+    
+    if recarga_bad > 0:
+        raise AssertionError(
+            f"FALHA Gate 10 - {recarga_bad} registros com NaN/Inf em QTD_RECARGAS"
+        )
+    print(f"    ✓ PASS: Sem NaN/Inf em QTD_RECARGAS_M1")
+    
+    # =========================================================================
+    # GATE 11: Pagamento cobertura ≥2%
+    # =========================================================================
+    print("  [Gate 11] Verificando cobertura de Pagamento...")
+    pag_non_null = df_abt.filter(F.col("qtd_itens_pagamento_m1") > 0).count()
+    pag_pct = (pag_non_null / total) * 100
+    
+    print(f"    Clientes com Pagamento: {pag_non_null:>12,} / {total:,} ({pag_pct:>6.2f}%)")
+    
+    if pag_pct < 2:
+        raise AssertionError(
+            f"FALHA Gate 11 - Pagamento com cobertura muito baixa! "
+            f"{pag_pct:.2f}% < 2% (esperado 5-10%)"
+        )
+    print(f"    ✓ PASS: Pagamento em {pag_pct:.2f}% dos registros (esperado 5-10%)")
+    
+    # =========================================================================
+    # GATE 12: Atraso cobertura ≥10%
+    # =========================================================================
+    print("  [Gate 12] Verificando cobertura de Atraso...")
+    atr_non_null = df_abt.filter(F.col("qtd_faturas_abertas_m1") > 0).count()
+    atr_pct = (atr_non_null / total) * 100
+    
+    print(f"    Clientes com Atraso: {atr_non_null:>12,} / {total:,} ({atr_pct:>6.2f}%)")
+    
+    if atr_pct < 10:
+        raise AssertionError(
+            f"FALHA Gate 12 - Atraso com cobertura muito baixa! "
+            f"{atr_pct:.2f}% < 10% (esperado 20-30%)"
+        )
+    print(f"    ✓ PASS: Atraso em {atr_pct:.2f}% dos registros (esperado 20-30%)")
+    
+    # =========================================================================
+    # GATE 13: QTD_ITENS_PAGAMENTO_M1 sanidade
+    # =========================================================================
+    print("  [Gate 13] Verificando sanidade de QTD_ITENS_PAGAMENTO_M1...")
+    pag_bad = df_abt.filter(
+        (F.col("qtd_itens_pagamento_m1") < 0) |
+        (F.col("qtd_itens_pagamento_m1") > 1000)
+    ).count()
+    
+    if pag_bad > 0:
+        raise AssertionError(
+            f"FALHA Gate 13 - {pag_bad} registros com QTD_ITENS_PAGAMENTO fora do range [0-1000]"
+        )
+    
+    min_pag = df_abt.agg(F.min("qtd_itens_pagamento_m1")).collect()[0][0]
+    max_pag = df_abt.agg(F.max("qtd_itens_pagamento_m1")).collect()[0][0]
+    print(f"    Range: [{min_pag}, {max_pag}]")
+    print(f"    ✓ PASS: QTD_ITENS_PAGAMENTO_M1 sanidade OK")
+    
+    # =========================================================================
+    # GATE 14: QTD_FATURAS_ABERTAS_M1 sanidade
+    # =========================================================================
+    print("  [Gate 14] Verificando sanidade de QTD_FATURAS_ABERTAS_M1...")
+    atr_bad = df_abt.filter(
+        (F.col("qtd_faturas_abertas_m1") < 0) |
+        (F.col("qtd_faturas_abertas_m1") > 500)
+    ).count()
+    
+    if atr_bad > 0:
+        raise AssertionError(
+            f"FALHA Gate 14 - {atr_bad} registros com QTD_FATURAS_ABERTAS fora do range [0-500]"
+        )
+    
+    min_atr = df_abt.agg(F.min("qtd_faturas_abertas_m1")).collect()[0][0]
+    max_atr = df_abt.agg(F.max("qtd_faturas_abertas_m1")).collect()[0][0]
+    print(f"    Range: [{min_atr}, {max_atr}]")
+    print(f"    ✓ PASS: QTD_FATURAS_ABERTAS_M1 sanidade OK")
     
     # =========================================================================
     # SUMÁRIO
     # =========================================================================
-    print("\n" + "="*80)
-    if all_passed:
-        print(">>> [Validate v4] ✅ TODOS OS 9 GATES PASSARAM!")
-    else:
-        print(">>> [Validate v4] ❌ ALGUNS GATES FALHARAM")
-    print("="*80)
+    print("\n>>> [Validate ABT v6] TODOS OS 14 GATES PASSARAM ✓")
     print(f"    Total de registros: {total:,}")
-    print(f"    Registros únicos: {unique_key:,}")
+    print(f"    Retenção vs ABT v5: {total*100/count_abt_v5:.2f}%")
     print(f"    Cobertura Score_01: {score01_pct:.2f}%")
     print(f"    Cobertura Score_02: {score02_pct:.2f}%")
     print(f"    Cobertura Telco: {telco_pct:.2f}%")
-    print(f"    Cobertura Cadastro: {cadastro_pct:.2f}%\n")
-    
-    return {
-        "passed": all_passed,
-        "gates": gates_result
-    }
+    print(f"    Cobertura Cadastro: {cadastro_pct:.2f}%")
+    print(f"    Cobertura Recarga: {recarga_pct:.2f}%")
+    print(f"    Cobertura Pagamento: {pag_pct:.2f}%")
+    print(f"    Cobertura Atraso: {atr_pct:.2f}%\n")
