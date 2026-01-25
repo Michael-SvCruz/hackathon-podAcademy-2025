@@ -756,3 +756,128 @@ def validate_abt_v6(df_abt, count_abt_v5):
     print(f"    Cobertura Recarga: {recarga_pct:.2f}%")
     print(f"    Cobertura Pagamento: {pag_pct:.2f}%")
     print(f"    Cobertura Atraso: {atr_pct:.2f}%\n")
+
+
+def validate_abt_v6_1(df_abt, count_abt_v6):
+    """
+    Validações obrigatórias para ABT v6.1 (v6 + Feature Enhancement).
+    
+    Gates:
+    1-14: Herdados de v6 (unicidade, anti-leakage, cobertura v1-v6)
+    15: DESCONTO_RATE entre 0-1
+    16: DELINQUENCY_RATE entre 0-1
+    17: MAX_DIAS_ATRASO >= 0
+    
+    Levanta AssertionError se algum gate falhar.
+    """
+    print("\n>>> [Validate ABT v6.1] Iniciando 17 gates de qualidade...\n")
+    
+    total = df_abt.count()
+    
+    # =========================================================================
+    # GATES 1-14: Herdadas de v6 (chamar validate_abt_v6)
+    # =========================================================================
+    validate_abt_v6(df_abt, count_abt_v6)
+    
+    # =========================================================================
+    # GATE 15: DESCONTO_RATE entre 0-1
+    # =========================================================================
+    print("  [Gate 15] Verificando sanidade de DESCONTO_RATE...")
+    
+    invalid_desconto = df_abt.filter(
+        (F.col("desconto_rate_m1") < 0) | (F.col("desconto_rate_m1") > 1) |
+        (F.col("desconto_rate_m3") < 0) | (F.col("desconto_rate_m3") > 1) |
+        (F.col("desconto_rate_m6") < 0) | (F.col("desconto_rate_m6") > 1)
+    ).count()
+    
+    if invalid_desconto > 0:
+        raise AssertionError(
+            f"FALHA Gate 15 - {invalid_desconto} registros com DESCONTO_RATE fora do range [0,1]"
+        )
+    
+    # Estatísticas do novo feature
+    desconto_m1_notnull = df_abt.filter(F.col("desconto_rate_m1").isNotNull()).count()
+    desconto_m1_cov = (desconto_m1_notnull / total) * 100
+    desconto_m1_mean = df_abt.filter(F.col("desconto_rate_m1") > 0).agg(
+        F.mean("desconto_rate_m1")
+    ).collect()[0][0]
+    desconto_m1_max = df_abt.agg(F.max("desconto_rate_m1")).collect()[0][0]
+    
+    print(f"    DESCONTO_RATE_M1:")
+    print(f"      Cobertura: {desconto_m1_cov:>6.2f}%")
+    print(f"      Média (c/ valor): {desconto_m1_mean:.4f}" if desconto_m1_mean else "      Média: N/A")
+    print(f"      Máximo: {desconto_m1_max:.4f}")
+    print(f"    ✓ PASS: DESCONTO_RATE válido (range 0-1)")
+    
+    # =========================================================================
+    # GATE 16: DELINQUENCY_RATE entre 0-1
+    # =========================================================================
+    print("  [Gate 16] Verificando sanidade de DELINQUENCY_RATE...")
+    
+    invalid_del = df_abt.filter(
+        (F.col("delinquency_rate_m1") < 0) | (F.col("delinquency_rate_m1") > 1) |
+        (F.col("delinquency_rate_m3") < 0) | (F.col("delinquency_rate_m3") > 1) |
+        (F.col("delinquency_rate_m6") < 0) | (F.col("delinquency_rate_m6") > 1)
+    ).count()
+    
+    if invalid_del > 0:
+        raise AssertionError(
+            f"FALHA Gate 16 - {invalid_del} registros com DELINQUENCY_RATE fora do range [0,1]"
+        )
+    
+    # Estatísticas do novo feature
+    del_m1_notnull = df_abt.filter(F.col("delinquency_rate_m1").isNotNull()).count()
+    del_m1_cov = (del_m1_notnull / total) * 100
+    del_m1_mean = df_abt.filter(F.col("delinquency_rate_m1") > 0).agg(
+        F.mean("delinquency_rate_m1")
+    ).collect()[0][0]
+    del_m1_max = df_abt.agg(F.max("delinquency_rate_m1")).collect()[0][0]
+    
+    print(f"    DELINQUENCY_RATE_M1:")
+    print(f"      Cobertura: {del_m1_cov:>6.2f}%")
+    print(f"      Média (c/ valor): {del_m1_mean:.4f}" if del_m1_mean else "      Média: N/A")
+    print(f"      Máximo: {del_m1_max:.4f}")
+    print(f"    ✓ PASS: DELINQUENCY_RATE válido (range 0-1)")
+    
+    # =========================================================================
+    # GATE 17: MAX_DIAS_ATRASO >= 0
+    # =========================================================================
+    print("  [Gate 17] Verificando sanidade de MAX_DIAS_ATRASO...")
+    
+    invalid_dias = df_abt.filter(
+        (F.col("max_dias_atraso_m1") < 0) |
+        (F.col("max_dias_atraso_m3") < 0) |
+        (F.col("max_dias_atraso_m6") < 0)
+    ).count()
+    
+    if invalid_dias > 0:
+        raise AssertionError(
+            f"FALHA Gate 17 - {invalid_dias} registros com MAX_DIAS_ATRASO < 0"
+        )
+    
+    # Estatísticas do novo feature
+    dias_m1_positive = df_abt.filter(F.col("max_dias_atraso_m1") > 0).count()
+    dias_m1_cov = (dias_m1_positive / total) * 100
+    dias_m1_mean = df_abt.filter(F.col("max_dias_atraso_m1") > 0).agg(
+        F.mean("max_dias_atraso_m1")
+    ).collect()[0][0]
+    dias_m1_max = df_abt.agg(F.max("max_dias_atraso_m1")).collect()[0][0]
+    dias_m1_p90 = df_abt.approxQuantile("max_dias_atraso_m1", [0.9], 0.01)[0]
+    
+    print(f"    MAX_DIAS_ATRASO_M1:")
+    print(f"      Clientes c/ atraso: {dias_m1_cov:>6.2f}%")
+    print(f"      Média dias (c/ atraso): {dias_m1_mean:.1f}" if dias_m1_mean else "      Média: N/A")
+    print(f"      P90: {dias_m1_p90:.0f}")
+    print(f"      Máximo: {dias_m1_max:.0f}")
+    print(f"    ✓ PASS: MAX_DIAS_ATRASO válido (>= 0)")
+    
+    # =========================================================================
+    # SUMÁRIO FINAL v6.1
+    # =========================================================================
+    print("\n>>> [Validate ABT v6.1] TODOS OS 17 GATES PASSARAM ✓")
+    print(f"    Total de registros: {total:,}")
+    print(f"    Retenção vs ABT v6: {total*100/count_abt_v6:.2f}%")
+    print(f"\n    Enhancement Features (NOVO em v6.1):")
+    print(f"    - DESCONTO_RATE_M1: {desconto_m1_cov:.2f}% cobertura, média {desconto_m1_mean:.4f}" if desconto_m1_mean else f"    - DESCONTO_RATE_M1: {desconto_m1_cov:.2f}% cobertura")
+    print(f"    - DELINQUENCY_RATE_M1: {del_m1_cov:.2f}% cobertura, média {del_m1_mean:.4f}" if del_m1_mean else f"    - DELINQUENCY_RATE_M1: {del_m1_cov:.2f}% cobertura")
+    print(f"    - MAX_DIAS_ATRASO_M1: {dias_m1_cov:.2f}% clientes c/ atraso, P90 {dias_m1_p90:.0f} dias\n")
