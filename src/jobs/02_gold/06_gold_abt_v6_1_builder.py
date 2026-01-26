@@ -191,7 +191,7 @@ def aggregate_atraso_with_enhancements(df_atraso, df_spine):
         
         # Agregações base (do v6)
         agg = df_period.groupBy("num_cpf", "safra").agg(
-            F.sum(F.when(F.col("val_fat_aberto") > 0, F.lit(1)).otherwise(F.lit(0)))
+            F.countDistinct(F.when(F.col("val_fat_aberto") > 0, F.col("num_fatura_hash")))
              .alias(f"qtd_faturas_abertas_{period_name}"),
             F.sum(F.col("val_fat_aberto")).alias(f"sum_val_aberto_{period_name}"),
             F.avg(F.col("val_fat_aberto")).alias(f"avg_val_aberto_{period_name}"),
@@ -199,17 +199,17 @@ def aggregate_atraso_with_enhancements(df_atraso, df_spine):
             F.sum(F.col("val_fat_pagamento_bruto")).alias(f"sum_val_pagamento_{period_name}"),
             F.max(F.col("ind_wo")).alias(f"flag_teve_wo_{period_name}"),
             F.max(F.col("ind_pdd")).alias(f"flag_teve_pdd_{period_name}"),
-            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == "0-30 dias", 1))
+            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == "0-30 dias", F.col("num_fatura_hash")))
              .alias(f"qtd_faturas_aging_0_30_{period_name}"),
-            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == "31-60 dias", 1))
+            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == "31-60 dias", F.col("num_fatura_hash")))
              .alias(f"qtd_faturas_aging_31_60_{period_name}"),
-            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == "61-90 dias", 1))
+            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == "61-90 dias", F.col("num_fatura_hash")))
              .alias(f"qtd_faturas_aging_61_90_{period_name}"),
-            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == ">90 dias", 1))
+            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura") == ">90 dias", F.col("num_fatura_hash")))
              .alias(f"qtd_faturas_aging_90_plus_{period_name}"),
-            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura").isNull(), 1))
+            F.countDistinct(F.when(F.col("dw_faixa_aging_fatura").isNull(), F.col("num_fatura_hash")))
              .alias(f"qtd_faturas_aging_missing_{period_name}"),
-            # ====== NOVO EM v6.1: contagem total de faturas ======
+            # ====== NOVO EM v6.1: contagem total de faturas (DISTINCT) ======
             F.countDistinct(F.col("num_fatura_hash"))
              .alias(f"_total_faturas_count_{period_name}")
         )
@@ -238,13 +238,23 @@ def aggregate_atraso_with_enhancements(df_atraso, df_spine):
         # ====== NOVO EM v6.1: MAX DIAS EM ATRASO ======
         # Max Days Arrears = MAX(DATA_REFERENCIA - DATA_VENCIMENTO) para faturas abertas
         # Lógica: contar dias entre snapshot (DAT_REFERENCIA, sempre dia 01) e vencimento original
+        # IMPORTANTE: apenas contar para faturas VENCIDAS (referencia >= vencimento)
+        # Nota: datas em Atraso estão no formato string ddMMMyyyy:HH:mm:ss
         max_dias_agg = df_period.filter(
             F.col("val_fat_aberto") > 0  # Apenas faturas abertas
         ).groupBy("num_cpf", "safra").agg(
             F.max(
-                F.datediff(
-                    F.to_date(F.col("ts_referencia")),
-                    F.to_date(F.col("ts_vencimento_fat"))
+                F.when(
+                    F.to_date(F.col("ts_referencia"), "ddMMMyyyy:HH:mm:ss") >= 
+                    F.to_date(F.col("dat_vencimento_fat"), "ddMMMyyyy:HH:mm:ss"),
+                    # Fatura vencida: calcula dias
+                    F.datediff(
+                        F.to_date(F.col("ts_referencia"), "ddMMMyyyy:HH:mm:ss"),
+                        F.to_date(F.col("dat_vencimento_fat"), "ddMMMyyyy:HH:mm:ss")
+                    )
+                ).otherwise(
+                    # Fatura não vencida (futuro): 0 dias em atraso
+                    F.lit(0)
                 )
             ).alias(f"max_dias_atraso_{period_name}")
         )

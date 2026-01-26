@@ -53,15 +53,15 @@ IDADE_MINIMA_VALIDA = 18
 IDADE_MAXIMA_ESPERADA = 100
 
 # Variáveis numéricas confirmadas (0 não numéricos no data quality check)
-# NOTA: Reduzido para apenas as mais confiáveis; outros movidos para misto/categórico
-NUMERIC_VARS = ["var_03", "var_04", "var_05", "var_06"]
+# var_03-var_09: todas confirmadas como numéricas (ver docs/02_data_quality/cadastro.md seção 5.1)
+NUMERIC_VARS = ["var_03", "var_04", "var_05", "var_06", "var_07", "var_08", "var_09"]
 
 # Variáveis categóricas (alto volume de não numéricos)
 CATEGORICAL_VARS = ["var_15", "var_22", "var_23", "var_24", "var_25"]
 
 # Variáveis mistas (possível data, texto, ou parse customizado)
-# Inclui var_07-var_14, var_16-var_21 que podem ter valores não numéricos
-MIXED_VARS = ["var_02", "var_07", "var_08", "var_09", "var_10", "var_11", "var_12", "var_13", "var_14", "var_16", "var_17", "var_18", "var_19", "var_20", "var_21"]
+# var_10-var_14, var_16-var_21: podem ter valores não numéricos
+MIXED_VARS = ["var_02", "var_10", "var_11", "var_12", "var_13", "var_14", "var_16", "var_17", "var_18", "var_19", "var_20", "var_21"]
 # =============================================================================
 
 
