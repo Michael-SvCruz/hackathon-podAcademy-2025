@@ -1149,7 +1149,8 @@ def validate_abt_v6(df_abt, count_abt_v5):
     # =========================================================================
     print("  [Gate 8] Verificando completude de Cadastro (age, var_02-25)...")
     
-    cadastro_cols = ["age"] + [f"var_{i}_adj" for i in range(2, 26)]
+    # Procurar pelos nomes corretos: idade_anos (não age) e var_02-25 (não var_2_adj)
+    cadastro_cols = ["idade_anos", "cep_3_digitos", "statusrf"] + [f"var_{i:02d}" for i in range(2, 26)]
     cadastro_total_cells = 0
     cadastro_non_null_cells = 0
     
