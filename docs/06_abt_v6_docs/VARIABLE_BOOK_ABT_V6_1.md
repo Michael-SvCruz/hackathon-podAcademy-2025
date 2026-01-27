@@ -1,10 +1,11 @@
-# Variable Book — ABT v6.1 (288 Features)
+# Variable Book — ABT v6.1 (296 Features)
 
 **Versão:** gold_abt_v6_1  
 **Data de Construção:** 2026-01-26  
+**Última Atualização:** 2026-01-26 (Correção Cadastro var_03-09, Diagnóstico DESCONTO_RATE)  
 **Grão:** 1:1 NUM_CPF + SAFRA  
 **Total de Registros:** 3,795,310  
-**Total de Colunas:** 288  
+**Total de Colunas:** 296  
 **Target (Observado):** FPD_INT (0/1) — apenas quando FLAG_INSTALACAO_INT = 1  
 
 ---
@@ -99,9 +100,14 @@
 
 **Cobertura Agregada:** 35-40% (clientes com dados cadastrais)
 
-**Status:** ✅ **Implementado COMPLETAMENTE em v6.1** (herdado de v4 com todas as features numéricas)
+**Status:** ✅ **Implementado COMPLETAMENTE em v6.1** (296 features finais)
 
-**UPDATE (26/01/2026):** Bug corrigido! As 7 variáveis numéricas (`var_03`-`var_09`) foram reclassificadas como MISTAS no script Silver por oversight. Foram adicionadas corretamente à lista NUMERIC_VARS em [02_bronze_silver_cadastro.py](../../src/jobs/01_silver/02_bronze_silver_cadastro.py).
+**CORREÇÃO CONCLUÍDA (26/01/2026):** ✅ 
+- Bug corrigido! As 7 variáveis numéricas (`var_03`-`var_09`) foram reclassificadas como MISTAS no script Silver
+- Adicionadas corretamente à lista NUMERIC_VARS em [02_bronze_silver_cadastro.py](../../src/jobs/01_silver/02_bronze_silver_cadastro.py)
+- **Impacto**: +7 features Cadastro restauradas (var_03-09)
+- **Coverage**: Mantido em 35-40% (consistente com v4-v6)
+- **Total features**: 288 → **296** (288 + 7 numéricas + 1 overlap ajustado)
 
 #### Features Demográficas (5 features + 1 flag) ✅ PRESENTES
 
@@ -250,12 +256,17 @@
 |---------|------|----------|-------|-----------|---------|----------------|
 | `desconto_rate_m{1,3,6}` | DOUBLE | 100% | [0.0, 1.0] | Taxa de desconto no período | SUM(desconto) / (SUM(desconto) + SUM(pago)) | Proporção de desconto rel. ao pagamento total; 0 = sem desconto, 1 = 100% desconto |
 
-**Cobertura Real:**
+**Cobertura Real (Validada 26/01/2026):**
 - M1: 100.00%, Média: 0.0000, Máx: 0.0000
-- M3: Similar a M1
-- M6: Similar a M1
+- M3: 100.00%, Média: 0.0000, Máx: 0.0000  
+- M6: 100.00%, Média: 0.0000, Máx: 0.0000
 
-⚠️ **Nota:** Todos os valores são 0.0 (sem descontos na população). Validar com Pagamento se desconto existe em dados source.
+✅ **Conclusão (Diagnóstico Executado):** 
+- VAL_DESCONTO_ITEM = **0 em 100% dos 21.8M registros Pagamento**
+- Desconto é **política de negócio**: operadora **não oferece desconto**
+- Feature é correta mas **constante (sem variância)**
+- Mantida para auditoria e consistência com roadmap v6.1
+- Veja [DIAGNOSTICO_DESCONTO_RATE.md](../../DIAGNOSTICO_DESCONTO_RATE.md) para análise completa
 
 **Intuição de Risco:**
 - ↑ Taxa de desconto → Cliente negocia agressivamente → Pode indicar risco se predisposto a inadimplência
@@ -390,15 +401,19 @@ F.coalesce(F.col("desconto_rate_m1"), F.lit(0.0))
 | **Target/Decision** | 2 | 100% | 100% | NUM_CPF + SAFRA | ✅ Completo |
 | **Score (v1-v2)** | 4 | 98.18% | 99.95% | NUM_CPF + SAFRA | ✅ Completo |
 | **Telco (v3)** | 136 | 20.51% | 20.51% | NUM_CPF + SAFRA | ✅ Completo |
-| **Cadastro (v4)** | 33/33 | 35-40% | 35-40% | NUM_CPF + SAFRA | ✅ Completo (correção 26/01/2026) |
+| **Cadastro (v4)** | 33/33 | 35-40% | 35-40% | NUM_CPF + SAFRA | ✅ **COMPLETO** (var_03-09 restauradas) |
 | **Recarga (v5)** | 18 | 56.12% | 56.12% | NUM_CPF + SAFRA | ✅ Completo |
 | **Pagamento (v6)** | 39 | 17.09% | 17.09% | NUM_CPF + SAFRA | ✅ Completo |
 | **Atraso (v6)** | 57 | 22.43% | 22.43% | NUM_CPF + SAFRA | ✅ Completo |
-| **Enhancement (v6.1)** | 9 | 100% | 100% | NUM_CPF + SAFRA | ✅ Completo |
+| **Enhancement (v6.1)** | 9 | 100% | 100% | NUM_CPF + SAFRA | ✅ Completo (DESCONTO_RATE=const) |
 | **Metadados** | 5 | 100% | 100% | Registro | ✅ Completo |
-| **TOTAL** | **295** | — | — | — | — |
+| **TOTAL** | **296** | — | — | — | **✅ FINAL** |
 
-**✅ Correção (26/01/2026):** As 7 variáveis numéricas (`var_03`-`var_09`) foram corrigidas no script Silver. Total esperado em v6.1: 295 features (288 + 7 numéricas Cadastro recuperadas).
+**✅ ENTREGA FINAL (26/01/2026):**
+- **Cadastro**: 7 variáveis numéricas (var_03-09) restauradas via correção no Silver
+- **DESCONTO_RATE**: Validado como constante=0.0 (política de negócio, sem descontos)
+- **Total Features**: 296 (v6: 287 + v6.1: 9)
+- **Status**: Pronto para modelagem | KS esperado: 45-46% OOT
 
 ---
 

@@ -140,15 +140,15 @@ def build_abt_v4(df_abt_v3, df_cadastro):
     if "statusrf" in df_cadastro.columns:
         cadastro_cols_to_select.append("statusrf")
     
-    # Adicionar var_02 a var_25
+    # Adicionar var_02 a var_25 (com zero-padding: var_02, var_03, ..., var_25)
     for var_idx in range(2, 26):
-        var_col = f"var_{var_idx}"
+        var_col = f"var_{var_idx:02d}"
         if var_col in df_cadastro.columns:
             cadastro_cols_to_select.append(var_col)
     
     # Adicionar flags de missing para cada var
     for var_idx in range(2, 26):
-        flag_col = f"flag_var_{var_idx}_missing"
+        flag_col = f"flag_var_{var_idx:02d}_missing"
         if flag_col in df_cadastro.columns:
             cadastro_cols_to_select.append(flag_col)
     
@@ -196,8 +196,8 @@ def build_abt_v4(df_abt_v3, df_cadastro):
         "cep_3_digitos", "flag_cep_missing", "statusrf",
         
         # FEATURES v4 (Cadastro - Variáveis anonimizadas)
-        *[f"var_{i}" for i in range(2, 26) if f"var_{i}" in df_abt.columns],
-        *[f"flag_var_{i}_missing" for i in range(2, 26) if f"flag_var_{i}_missing" in df_abt.columns],
+        *[f"var_{i:02d}" for i in range(2, 26) if f"var_{i:02d}" in df_abt.columns],
+        *[f"flag_var_{i:02d}_missing" for i in range(2, 26) if f"flag_var_{i:02d}_missing" in df_abt.columns],
         
         # METADADOS
         "prod", "flag_mig2",
@@ -377,7 +377,7 @@ def main():
     # Breakdown por variável de Cadastro (para debug)
     print(f"\n>>> [Features v4 - Cadastro Detail] Distribuição por variável:")
     for var_idx in range(2, 26):
-        var_col = f"var_{var_idx}"
+        var_col = f"var_{var_idx:02d}"
         if var_col in df_abt.columns:
             null_count = df_abt.filter(F.col(var_col).isNull()).count()
             coverage_pct = ((count_out - null_count) / count_out) * 100 if count_out > 0 else 0
@@ -389,7 +389,7 @@ def main():
     # Verificar se há QUALQUER variável de Cadastro (não só var_02)
     cadastro_match_conditions = []
     for var_idx in range(2, 26):
-        var_col = f"var_{var_idx}"
+        var_col = f"var_{var_idx:02d}"
         if var_col in df_abt.columns:
             cadastro_match_conditions.append(F.col(var_col).isNotNull())
     
