@@ -132,9 +132,9 @@ FROM abt_v1_rev
 
 ## 📁 Output
 
-**Caminho:** `/Volumes/hackathon_2025/default/gold/abt_v1_rev_delta/`
+**Caminho:** `/Volumes/hackathon_2025/default/gold/rev_abt/abt_v1_rev_delta/`
 
-**Tabela UC:** `hackathon_2025.default.gold_abt_v1_rev`
+**Tabela UC:** `hackathon_2025.rev_gold.gold_abt_v1_rev`
 
 **Colunas (Total: ~28 features + metadata)**
 ```
@@ -250,7 +250,8 @@ df_pagamento.withColumn("rn", F.row_number().over(window)) \
 python src/jobs/02_gold/rev_gold/00_gold_abt_v1_base.py \
   --silver_atraso "/Volumes/hackathon_2025/default/silver/atraso_silver_delta/" \
   --silver_pagamento "/Volumes/hackathon_2025/default/silver/pagamento_silver_delta/" \
-  --output_path "/Volumes/hackathon_2025/default/gold/abt_v1_rev_delta/"
+  --output_path "/Volumes/hackathon_2025/default/gold/rev_abt/abt_v1_rev_delta/" \
+  --target_table "hackathon_2025.rev_gold.gold_abt_v1_rev"
 ```
 
 ---

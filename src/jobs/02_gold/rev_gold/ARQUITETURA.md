@@ -98,14 +98,14 @@ MODELO
 │                    SAÍDA (Gold)                                 │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Delta Lake: /Volumes/.../abt_v1_rev_delta/                   │
+│  Delta Lake: /Volumes/.../gold/rev_abt/abt_v1_rev_delta/      │
 │  ├─ Format: Parquet compresso                                 │
 │  ├─ Grain: 1:1 NUM_CPF + SAFRA                                │
 │  ├─ Registros: ~100K-500K (estimado)                          │
 │  ├─ Features: 23 + 6 metadados                                │
 │  └─ Tamanho: ~100-500 MB (estimado)                           │
 │                                                                 │
-│  Unity Catalog: hackathon_2025.default.gold_abt_v1_rev        │
+│  Unity Catalog: hackathon_2025.rev_gold.gold_abt_v1_rev        │
 │  ├─ Queryable como tabela SQL                                 │
 │  └─ Documentada com metadados                                 │
 │                                                                 │
@@ -333,7 +333,7 @@ CREATE TABLE gold_abt_v1_rev (
   num_derivadas INT
 )
 USING DELTA
-LOCATION '/Volumes/hackathon_2025/default/gold/abt_v1_rev_delta/'
+LOCATION '/Volumes/hackathon_2025/default/gold/rev_abt/abt_v1_rev_delta/'
 ```
 
 ---
@@ -367,7 +367,7 @@ v4 (Telco) → v5 (Score_01) → v6 (Score_02) → v6.1 (Enhanced)
 
 ```
 Disco (Delta Lake)
-/Volumes/hackathon_2025/default/gold/abt_v1_rev_delta/
+/Volumes/hackathon_2025/default/gold/rev_abt/abt_v1_rev_delta/
 ├─ _delta_log/         (transaction log)
 ├─ part-00000...       (parquet files)
 ├─ part-00001...
@@ -377,9 +377,9 @@ Tamanho estimado: 100-500 MB (por ~100K-500K registros)
 Compressão: Snappy (default Delta)
 
 Metastore (Unity Catalog)
-hackathon_2025.default.gold_abt_v1_rev
-├─ Queryable: SELECT * FROM gold_abt_v1_rev
-├─ Versionado: DESCRIBE HISTORY gold_abt_v1_rev
+hackathon_2025.rev_gold.gold_abt_v1_rev
+├─ Queryable: SELECT * FROM hackathon_2025.rev_gold.gold_abt_v1_rev
+├─ Versionado: DESCRIBE HISTORY hackathon_2025.rev_gold.gold_abt_v1_rev
 └─ Compartilhado: Acesso entre notebooks/jobs
 ```
 

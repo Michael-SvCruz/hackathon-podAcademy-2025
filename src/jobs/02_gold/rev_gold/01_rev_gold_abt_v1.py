@@ -1,15 +1,15 @@
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS (rev_gold)
-SCRIPT: 00_gold_abt_v1_base.py
+SCRIPT: 01_rev_gold_abt_v1.py
 OBJETIVO: Construir ABT v1 rev_gold (BASELINE: Atraso + Pagamento)
 --------------------------------------------------------------------------------
-ROADMAP rev_gold (Conforme Fernando Parahyba - Reunião 07/01/2026):
+ROADMAP rev_gold (Conforme reunião de 07/01/2026):
 
 Sequência PROPOSTA nas reuniões (ordem de impacto esperado de KS):
 1. ✅ ATRASO + PAGAMENTO (baseline delinquência) ← v1 (este script)
    - Comportamento de adimplência/inadimplência
-   - Fernando: "O comportamento de pagamento é crucial"
+   - "O comportamento de pagamento é crucial"
    - Esperado: ~40-42% KS
    
 2. RECARGA (uso/frequência)
@@ -39,151 +39,48 @@ Sequência PROPOSTA nas reuniões (ordem de impacto esperado de KS):
 FEATURES CRIADAS (v1):
 ═════════════════════════════════════════════════════════════════════════════
 
-ATRASO (12 features + 4 flags de missing):
-────────────────────────────────────────────
-1. ATRASO_DIAS_MAX (dias_atraso_max)
-   - Máximo de dias em atraso (últimos 12M)
-   - Sinal forte: quanto mais alto, maior risco
-   
-2. ATRASO_QTD (dias_atraso_qtd)
-   - Quantidade de faturas em atraso
-   - Frequência é sinal forte
-   
-3. ATRASO_VALOR_MAX (valor_atraso_max)
-   - Maior valor em atraso
-   
-4. ATRASO_VALOR_TOTAL (valor_atraso_total)
-   - Soma total em atraso
-   
-5. ATRASO_VALOR_MEDIO (valor_atraso_medio)
-   - Valor médio por fatura atrasada
-   
-6. ATRASO_FLAG_ATUAL (flag_atraso_atual)
-   - Indicador: 1 se há atraso no snapshop atual
-   - Crítico para decisão de crédito
-   
-7. ATRASO_FLAG_WRITE_OFF (flag_write_off)
-   - Indicador: 1 se consta write-off
-   - Muito relevante para risco
-   
-8. ATRASO_FLAG_PDD (flag_pdd)
-   - Possibly Defaulted - indicador de risco
-   
-9. ATRASO_FLAG_ACA (flag_aca)
-   - Ação judicial / cobrança ativa
-   - Indica escalação
-   
-10. ATRASO_FAIXA_AGING (faixa_aging_fatura)
-    - Faixa de antigüidade (0-30d, 30-60d, 60-90d, 90d+)
-    - Encode ordinal: 0, 1, 2, 3
-    
-11. ATRASO_FAIXA_TEMPO_BASE (faixa_tempo_base)
-    - Tempo na base (0-3m, 3-6m, 6-12m, 12m+)
-    - Clientes mais novos = maior risco
-    
-12. ATRASO_QTD_FATURAS_TOTAL (qtd_faturas_total)
-    - Total de faturas no período
-    - Contexto: nem todo cliente paga mesmo se bom
+ATRASO (12 features):
+────────────────────
+- atraso_faixa_aging: Faixa de antigüidade (dias)
+- flag_write_off: Conta baixada (1/0)
+- flag_pdd: Possibly Defaulted (1/0)
+- flag_aca: Ação de cobrança ativa (1/0)
+- atraso_faixa_tempo_base: Tempo como cliente (faixa)
+- atraso_valor_aberto: Valor em atraso (R$)
+- atraso_valor_multa_juros: Juros incididos (R$)
+- flag_ind_wo_sentinela: Missing data flag
+- flag_ind_pdd_sentinela: Missing data flag
+- flag_status_fat_missing: Missing data flag
 
-FLAGS DE MISSING:
-13. FLAG_ATRASO_MISSING (flag_atraso_missing)
-    - 1 se não há dados de atraso (novo cliente)
-    
-14-16. Flags para colunas de sentinela
+PAGAMENTO (8 features):
+──────────────────────
+- pagto_valor_atual: Valor pago agora (R$)
+- pagto_valor_original: Valor original (R$)
+- pagto_valor_fatura: Total por fatura (R$)
+- pagto_desconto_total: Descontos/abonos (R$)
+- pagto_juros_total: Juros pagos (R$)
+- flag_pagto_pendente: Pendente (1/0)
+- flag_juros_incidido: Houve juros (1/0)
+- cod_metodo_pagto: Método de pagamento
 
-
-PAGAMENTO (18 features + 6 flags):
-──────────────────────────────────
-1. PAGTO_QTD (qtd_pagto)
-   - Quantidade de pagamentos realizados
-   - Sinal positivo: cliente paga
-   
-2. PAGTO_VALOR_TOTAL (valor_pagto_total)
-   - Soma total paga
-   
-3. PAGTO_VALOR_MEDIO (valor_pagto_medio)
-   - Valor médio por pagamento
-   
-4. PAGTO_VALOR_MINIMO (valor_pagto_minimo)
-   - Menor pagamento (pode indicar dificuldades)
-   
-5. PAGTO_VALOR_MAXIMO (valor_pagto_maximo)
-   - Maior pagamento
-   
-6. PAGTO_FREQ_DIAS (freq_dias_entre_pagtos)
-   - Dias médios entre pagamentos
-   - Baixo = cliente organizado
-   
-7. PAGTO_DIAS_DESDE_ULTIMO (dias_desde_ultimo_pagto)
-   - Dias do último pagamento até snapshot
-   - Alto = pode estar inadimplente
-   
-8. PAGTO_FLAG_PENDENTE (flag_pagto_pendente)
-   - 1 se há pagamento pendente/em atraso
-   
-9. PAGTO_FLAG_JUROS (flag_juros_neg)
-   - 1 se incidência de juros/multas
-   
-10. PAGTO_JUROS_TOTAL (juros_total)
-    - Soma de juros incididos
-    - Indica atrasos anteriores
-    
-11. PAGTO_DESCONTO_TOTAL (desconto_total)
-    - Total de descontos/abonos recebidos
-    - Pode indicar negocia​ção/risco
-    
-12. PAGTO_METODO_PREDOMINANTE (cod_metodo_pagto_mode)
-    - Método mais comum (débito automático, boleto, etc)
-    - Débito automático = maior comprometimento
-    
-13. PAGTO_FLAG_AUTOMATICO (flag_pagto_automatico)
-    - 1 se usa débito automático
-    - Sinal positivo
-    
-14. PAGTO_TAXA_PAGTO (taxa_pagamento)
-    - Taxa de pagamento (qtd_pagto / qtd_faturas)
-    - 0-100%: quanto da fatura é paga
-    
-15-18. Derivadas e flags de missing
-
-
-DERIVADAS INTELIGENTES:
-─────────────────────────
-1. DELINQUENCY_RATE (delinquency_rate)
-   - (atraso_qtd / qtd_faturas_total) * 100
-   - Percentual de faturas em atraso
-   
-2. PAYMENT_RELIABILITY (payment_reliability)
-   - (qtd_pagto / (qtd_pagto + atraso_qtd)) * 100
-   - Confiabilidade relativa
-   
-3. RISK_SCORE_DELINQUENCY (risk_score_delinquency)
-   - atraso_dias_max * delinquency_rate / 100
-   - Score composto
-
-
-METADATA:
-──────────
-- gold_version: "rev_gold_abt_v1"
-- gold_build_date: timestamp
-- gold_feature_blocks: "atraso_pagamento"
-- num_registros_atraso: quant de faturas analisadas
-- num_registros_pagamento: quant de pagamentos analisados
-
-═════════════════════════════════════════════════════════════════════════════
+DERIVADAS (3 features):
+───────────────────────
+- delinquency_rate: Taxa de delinquência (%)
+- risk_score_delinquency: Score composto
+- flag_cliente_em_risco: Flag agregada de risco (1/0)
 
 ANTI-LEAKAGE:
 - Todos os dados vêm de Silver (pré-processado)
 - SAFRA_ATRASO = snapshot mensal (dia 01)
 - SAFRA_PAGAMENTO derivada de DAT_STATUS_FATURA (pré-evento)
 - Não há dados futuros
-- Não há target_definition utilizado (target será adicionado em join posterior)
+- Sem target_definition utilizado (adicionado em join posterior)
 
-VALIDAÇÕES (Gates):
+VALIDAÇÕES (4 Gates - ver validators/validate_abt_v1_rev.py):
 1. Grain: 1:1 por NUM_CPF + SAFRA
-2. Nenhum NULL em chaves
-3. Distribuição razoável de atrasos
-4. Taxa de completude aceitável (>70%)
+2. Chaves: sem NULLs
+3. Completude: >70% features
+4. Distribuição: 20-40% em risco
 
 PRÓXIMAS VERSÕES:
 - v2: +Recarga
@@ -196,13 +93,12 @@ PRÓXIMAS VERSÕES:
 ────────────────────────────────────────────────────────────────────────────
 
 REFERÊNCIAS:
-- Fernando Parahyba (Claro): "O comportamento de pagamento é crucial..."
-- Allan Basilio: "Use os dados diretamente para ver se agregam valor"
 - Docs:
   - /docs/01_data_dictionary/atraso.md
   - /docs/01_data_dictionary/pagamento.md
   - /docs/03_silver_rules/atraso.md
   - /docs/03_silver_rules/pagamento.md
+  - /validators/validate_abt_v1_rev.py (detalhes dos gates)
 
 ────────────────────────────────────────────────────────────────────────────
 """
@@ -213,6 +109,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 from src.utils.spark_utils import get_spark_session
+from validators.validate_abt_v1_rev import ValidateABTV1Rev
 
 # =============================================================================
 # CONFIGURAÇÃO PADRÃO
@@ -373,45 +270,6 @@ def build_abt_v1_base(df_atraso, df_pagamento):
     return df_abt
 
 
-def validate_abt_v1_rev(df_abt, count_in):
-    """
-    Validações básicas para ABT v1 rev_gold.
-    """
-    print(">>> [Validate] Executando gates de qualidade...")
-    
-    count_out = df_abt.count()
-    
-    # Gate 1: Grain (1:1 por CPF+SAFRA)
-    count_unique = df_abt.select("num_cpf", "safra").distinct().count()
-    assert count_unique == count_out, \
-        f"Gate 1 FALHOU: esperado grain 1:1, mas {count_out} registros com {count_unique} chaves únicas"
-    print(f"  ✓ Gate 1: Grain 1:1 (OK)")
-    
-    # Gate 2: Nenhum NULL em chaves
-    nulls_cpf = df_abt.filter(F.col("num_cpf").isNull()).count()
-    nulls_safra = df_abt.filter(F.col("safra").isNull()).count()
-    assert (nulls_cpf + nulls_safra) == 0, \
-        f"Gate 2 FALHOU: NULLs nas chaves (num_cpf={nulls_cpf}, safra={nulls_safra})"
-    print(f"  ✓ Gate 2: Sem NULLs nas chaves (OK)")
-    
-    # Gate 3: Features válidas (não todas nulas)
-    for col in ["atraso_valor_aberto", "pagto_valor_fatura"]:
-        if col in df_abt.columns:
-            nulls = df_abt.filter(F.col(col).isNull()).count()
-            completude = (count_out - nulls) * 100.0 / count_out
-            print(f"  ✓ Completude {col}: {completude:.1f}%")
-    
-    # Gate 4: Distribuição
-    dist_risco = df_abt.groupBy("flag_cliente_em_risco").count().collect()
-    print(f"  ✓ Distribuição de risco:")
-    for row in dist_risco:
-        pct = row["count"] * 100.0 / count_out
-        print(f"      flag_cliente_em_risco={row['flag_cliente_em_risco']}: {row['count']:>10} ({pct:>5.1f}%)")
-    
-    print(">>> [Validate] PASSOU em todos os gates! ✓")
-    return count_out
-
-
 def main():
     parser = argparse.ArgumentParser(description="Build Gold ABT v1 rev_gold - Atraso + Pagamento baseline")
     parser.add_argument("--silver_atraso", help="Caminho da Silver Atraso (Delta)")
@@ -466,10 +324,10 @@ def main():
     df_abt = build_abt_v1_base(df_atraso, df_pagamento)
 
     # =========================================================================
-    # 3) VALIDAÇÕES
+    # 3) VALIDAÇÕES (usando módulo validators)
     # =========================================================================
     try:
-        count_out = validate_abt_v1_rev(df_abt, count_atraso)
+        count_out = ValidateABTV1Rev.validate_all(df_abt, count_atraso)
     except AssertionError as e:
         print(f"!!! ERRO DE VALIDAÇÃO: {e}")
         sys.exit(1)
@@ -477,7 +335,7 @@ def main():
     # =========================================================================
     # 4) ESCRITA (DELTA LAKE)
     # =========================================================================
-    print(f">>> [Escrita] Salvando Gold ABT v1 rev_gold (Delta): {args.output_path}")
+    print(f"\n>>> [Escrita] Salvando Gold ABT v1 rev_gold (Delta): {args.output_path}")
 
     df_abt.write \
         .format("delta") \
@@ -487,7 +345,7 @@ def main():
         .save(args.output_path)
 
     # =========================================================================
-    # ESCRITA TABLE PARA DATABRICKS (UNITY CATALOG)
+    # 5) ESCRITA TABLE PARA DATABRICKS (UNITY CATALOG)
     # =========================================================================
     target_table = args.target_table
     try:
@@ -500,47 +358,48 @@ def main():
         print(f"!!! AVISO: Não foi possível salvar table UC: {e}")
 
     # =========================================================================
-    # 5) RELATÓRIO FINAL
+    # 6) RELATÓRIO FINAL
     # =========================================================================
     print("\n" + "="*80)
     print("RELATÓRIO FINAL - ABT v1 rev_gold (Atraso + Pagamento)")
     print("="*80)
     
     print(f"\n>>> [Stats] Ingestão:")
-    print(f"    Silver Atraso:     {count_atraso:>10} registros")
-    print(f"    Silver Pagamento:  {count_pagamento:>10} registros")
-    print(f"    ABT v1 output:     {count_out:>10} registros (1:1 CPF+SAFRA)")
+    print(f"    Silver Atraso:     {count_atraso:>10,} registros")
+    print(f"    Silver Pagamento:  {count_pagamento:>10,} registros")
+    print(f"    ABT v1 output:     {count_out:>10,} registros (1:1 CPF+SAFRA)")
     
     print(f"\n>>> [Stats] Distribuição de risco:")
     dist = df_abt.groupBy("flag_cliente_em_risco").count().orderBy("flag_cliente_em_risco").collect()
     for row in dist:
         pct = row["count"] * 100.0 / count_out
         label = "EM RISCO" if row["flag_cliente_em_risco"] == 1 else "BAIXO RISCO"
-        print(f"    {label:12s}: {row['count']:>10} ({pct:>5.1f}%)")
+        print(f"    {label:12s}: {row['count']:>10,} ({pct:>5.1f}%)")
     
     print(f"\n>>> [Features] Estatísticas de features críticas:")
     
     # Atraso
     atraso_com_valor = df_abt.filter(F.col("atraso_valor_aberto") > 0).count()
     pct_atraso = atraso_com_valor * 100.0 / count_out
-    print(f"    Clientes c/ atraso: {atraso_com_valor:>10} ({pct_atraso:>5.1f}%)")
+    print(f"    Clientes c/ atraso: {atraso_com_valor:>10,} ({pct_atraso:>5.1f}%)")
     
     # Pagamento
     pagto_com_valor = df_abt.filter(F.col("pagto_valor_fatura") > 0).count()
     pct_pagto = pagto_com_valor * 100.0 / count_out
-    print(f"    Clientes c/ pagto:  {pagto_com_valor:>10} ({pct_pagto:>5.1f}%)")
+    print(f"    Clientes c/ pagto:  {pagto_com_valor:>10,} ({pct_pagto:>5.1f}%)")
     
     # Write-off
     writeoff = df_abt.filter(F.col("flag_write_off") == 1).count()
     pct_wo = writeoff * 100.0 / count_out
-    print(f"    Write-off:          {writeoff:>10} ({pct_wo:>5.1f}%)")
+    print(f"    Write-off:          {writeoff:>10,} ({pct_wo:>5.1f}%)")
     
     print("\n" + "="*80)
     print(f"✓ ABT v1 rev_gold PRONTA PARA PRÓXIMA VERSÃO")
     print(f"  - Versão: {GOLD_VERSION}")
     print(f"  - Feature blocks: atraso (12 feat.) + pagamento (8 feat.) + 3 derivadas")
-    print(f"  - Total registros: {count_out}")
+    print(f"  - Total registros: {count_out:,}")
     print(f"  - Grain: 1:1 NUM_CPF + SAFRA")
+    print(f"  - Validações: 4/4 gates PASSARAM ✓")
     print(f"  - Próximo: v2 (+ Recarga)")
     print("="*80 + "\n")
 

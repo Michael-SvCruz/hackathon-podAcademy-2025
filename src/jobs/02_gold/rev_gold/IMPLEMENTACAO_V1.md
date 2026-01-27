@@ -163,8 +163,8 @@ VALIDAÇÕES:
 └─ Gate 4: Completude > 70%
 
 SAÍDA:
-├─ Delta: /Volumes/.../gold/abt_v1_rev_delta/
-├─ Table: hackathon_2025.default.gold_abt_v1_rev
+├─ Delta: /Volumes/.../gold/rev_abt/abt_v1_rev_delta/
+├─ Table: hackathon_2025.rev_gold.gold_abt_v1_rev
 └─ Relatório: estatísticas + distribuição
 ```
 
