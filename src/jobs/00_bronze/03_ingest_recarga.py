@@ -44,7 +44,7 @@ from src.utils.spark_utils import get_spark_session
 # CONFIGURAÇÃO PADRÃO (DESENVOLVIMENTO / DATABRICKS COMMUNITY)
 # =============================================================================
 # Caminhos apontando para os Volumes do Unity Catalog
-DEFAULT_INPUT_PATH = "/Volumes/hackathon_2025/default/source/base_recargas/"
+DEFAULT_INPUT_PATH = "/Volumes/hackathon_2025/default/source/bases_recarga/BI_FP_ASS_RECARGA_CMV_NOVA/"
 DEFAULT_OUTPUT_PATH = "/Volumes/hackathon_2025/default/bronze/recarga_delta/"
 DEFAULT_FORMAT = "parquet"
 # =============================================================================
