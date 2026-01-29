@@ -939,7 +939,11 @@ Exemplos de uso:
         help="Pular salvamento (para debug)"
     )
 
-    args = parser.parse_args()
+    # Use parse_known_args() to ignore Databricks/Jupyter kernel arguments
+    args, unknown = parser.parse_known_args()
+
+    if unknown:
+        print(f">>> [Config] Ignorando argumentos não reconhecidos (Databricks/Jupyter): {unknown[:2]}...")
 
     # Banner
     print("\n")
