@@ -147,12 +147,19 @@ def criar_features_atraso(df_silver: DataFrame) -> DataFrame:
     val_pagamento = F.coalesce(F.col("val_fat_pagamento_bruto"), F.lit(0.0))
     val_multa_juros = F.coalesce(F.col("val_multa_juros"), F.lit(0.0))
 
-    # Indicadores binários
-    ind_wo = F.coalesce(F.col("ind_wo"), F.lit(0))
-    ind_pdd = F.coalesce(F.col("ind_pdd"), F.lit(0))
-    ind_fraude = F.coalesce(F.col("ind_fraude"), F.lit(0))
-    ind_aca = F.coalesce(F.col("ind_aca"), F.lit(0))
-    ind_pccr = F.coalesce(F.col("ind_pccr"), F.lit(0))
+    # Indicadores binários - converter strings para int
+    # Valores como 'S', '1', 'Y' = 1, outros = 0
+    def str_to_binary(col_name):
+        return F.when(
+            F.upper(F.col(col_name)).isin(['1', 'S', 'Y', 'SIM', 'YES', 'TRUE']),
+            F.lit(1)
+        ).otherwise(F.lit(0))
+
+    ind_wo = str_to_binary("ind_wo") if "ind_wo" in df.columns else F.lit(0)
+    ind_pdd = str_to_binary("ind_pdd") if "ind_pdd" in df.columns else F.lit(0)
+    ind_fraude = str_to_binary("ind_fraude") if "ind_fraude" in df.columns else F.lit(0)
+    ind_aca = str_to_binary("ind_aca") if "ind_aca" in df.columns else F.lit(0)
+    ind_pccr = str_to_binary("ind_pccr") if "ind_pccr" in df.columns else F.lit(0)
 
     # Flag de fatura em aberto
     df = df.withColumn(
@@ -180,7 +187,7 @@ def criar_features_atraso(df_silver: DataFrame) -> DataFrame:
         # === FATURAS ABERTAS ===
         F.count("*").alias("qtd_registros_mes"),
         F.sum("flag_fatura_aberta").alias("qtd_faturas_abertas_mes"),
-        F.countDistinct(F.when(val_aberto > 0, F.col("seq_fatura"))).alias("qtd_faturas_distintas_abertas_mes"),
+        F.countDistinct(F.when(val_aberto > 0, F.col("contrato"))).alias("qtd_contratos_com_atraso_mes"),
 
         # === VALORES EM ABERTO ===
         F.sum(val_aberto).alias("sum_val_aberto_mes"),

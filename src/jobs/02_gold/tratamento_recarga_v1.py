@@ -362,12 +362,73 @@ def agregar_recarga_mensal(recarga: DataFrame) -> DataFrame:
     return recarga_mensal
 
 
-def validar_e_relatar(recarga: DataFrame, recarga_mensal: DataFrame) -> None:
+def salvar_delta_e_registrar_tabela(recarga: DataFrame, recarga_mensal: DataFrame) -> None:
     """
-    Etapa 5: Validações e relatórios de qualidade.
+    Etapa 5: Salvar DataFrames em Delta e registrar tabelas.
     """
     print("\n" + "="*80)
-    print("ETAPA 5: VALIDAÇÕES E RELATÓRIOS")
+    print("ETAPA 5: SALVAMENTO EM DELTA E REGISTRO DE TABELAS")
+    print("="*80 + "\n")
+    
+    # Salvar recarga (nível transacional)
+    print("Salvando recarga (transacional) em Delta...")
+    caminho_recarga = "/Volumes/hackathon_2025/default/gold/recarga_transacional_delta/"
+    
+    recarga.write \
+        .format("delta") \
+        .mode("overwrite") \
+        .option("mergeSchema", "true") \
+        .option("path", caminho_recarga) \
+        .save()
+    
+    print(f"✓ Recarga (transacional) salva em: {caminho_recarga}")
+    
+    # Registrar tabela recarga como tabela gerenciada
+    print("Registrando tabela recarga no Catalog...")
+    spark.sql(f"""
+        CREATE OR REPLACE TABLE hackathon_2025.default.recarga_transacional 
+        USING DELTA 
+        AS SELECT * FROM delta.`{caminho_recarga}`
+    """)
+    print("✓ Tabela recarga_transacional registrada")
+    
+    # Salvar recarga_mensal (agregado)
+    print("\nSalvando recarga_mensal (agregado) em Delta...")
+    caminho_recarga_mensal = "/Volumes/hackathon_2025/default/gold/recarga_mensal_delta/"
+    
+    recarga_mensal.write \
+        .format("delta") \
+        .mode("overwrite") \
+        .partitionBy("ANO_MES") \
+        .option("mergeSchema", "true") \
+        .option("path", caminho_recarga_mensal) \
+        .save()
+    
+    print(f"✓ Recarga (mensal) salva em: {caminho_recarga_mensal}")
+    print("  (Particionada por ANO_MES)")
+    
+    # Registrar tabela recarga_mensal como tabela gerenciada
+    print("Registrando tabela recarga_mensal no Catalog...")
+    spark.sql(f"""
+        CREATE OR REPLACE TABLE hackathon_2025.default.recarga_mensal 
+        USING DELTA 
+        AS SELECT * FROM delta.`{caminho_recarga_mensal}`
+    """)
+    print("✓ Tabela recarga_mensal registrada")
+    
+    print("\n" + "="*80)
+    print("SALVAMENTO CONCLUÍDO COM SUCESSO!")
+    print("="*80)
+    
+    return None
+
+
+def validar_e_relatar(recarga: DataFrame, recarga_mensal: DataFrame) -> None:
+    """
+    Etapa 6: Validações e relatórios de qualidade.
+    """
+    print("\n" + "="*80)
+    print("ETAPA 6: VALIDAÇÕES E RELATÓRIOS")
     print("="*80 + "\n")
     
     # Validação: Verificar ajuste de bônus
@@ -471,7 +532,10 @@ def main():
     # Etapa 4: Agregar mensal
     recarga_mensal = agregar_recarga_mensal(recarga)
     
-    # Etapa 5: Validar e relatar
+    # Etapa 5: Salvar em Delta e registrar tabelas
+    salvar_delta_e_registrar_tabela(recarga, recarga_mensal)
+    
+    # Etapa 6: Validar e relatar
     validar_e_relatar(recarga, recarga_mensal)
     
     # Retornar dataframes para possível uso posterior

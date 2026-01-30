@@ -1,439 +1,331 @@
-# 🚀 Hackathon PodAcademy 2025 - Projeto de Risco de Crédito
+# Hackathon PodAcademy 2025 - Modelagem de Risco de Crédito
 
-**Status:** Em desenvolvimento | **Início:** dez/2025 | **Término:** mar/2026 | **Grupo:** Hackathon PodAcademy 2025
-
----
-
-## 📋 Visão Geral
-
-Projeto de **Engenharia de Dados + Modelagem de Risco de Crédito** seguindo metodologia **CRISP-DM** com pipeline incremental de features para suportar decisões de elegibilidade (aprovação/reprovação) no contexto de **Telecom**.
-
-### 🎯 Objetivo Principal
-Construir um modelo de **risco de crédito** com:
-- ✅ Reprodutibilidade (pipeline + documentação)
-- ✅ Rastreabilidade (versionamento de datasets/ABTs)
-- ✅ Avaliação orientada a impacto (swap-in/swap-out, mudanças de aprovação)
-- ✅ Incremento de features (Score_01 → Score_02 → Telco → ... → Atraso)
-
-**Benchmark:** KS = 33,1 no OOT (fev/mar)
+**Status:** Engenharia de Dados COMPLETA | **Início:** Dez/2025 | **Grupo:** Hackathon PodAcademy 2025
 
 ---
 
-## 📊 Arquitetura de Dados
+## Referência Rápida
+
+| Item | Valor |
+|------|-------|
+| **ABT Final** | `hackathon_2025.default.gold_abt_v6_v2` |
+| **Registros** | 3.795.310 |
+| **Features** | 614 colunas (~250+ engenheiradas) |
+| **Target** | `fpd_int` (First Payment Default) |
+| **Grão** | `num_cpf + safra` (1:1) |
+| **Benchmark** | KS = 33,1 no OOT (Fev/Mar) |
+
+---
+
+## Visão Geral do Projeto
+
+Projeto de **Modelagem de Risco de Crédito** para Telecom utilizando **Arquitetura Medallion** (Bronze - Silver - Gold) com versionamento incremental de ABT (Analytical Base Table). Objetivo: prever inadimplência no primeiro pagamento (FPD) para decisões de elegibilidade de clientes.
+
+### Objetivos
+- **Reprodutibilidade:** Pipeline documentado e versionado
+- **Rastreabilidade:** Versionamento de datasets e ABTs
+- **Avaliação orientada a impacto:** Análise de swap-in/swap-out
+- **Adição incremental de features:** Score → Telco → Cadastro → Recarga → Pagamento → Atraso
+
+---
+
+## Arquitetura
 
 ```
-LANDING (Raw)
-    ↓
-BRONZE (Leitura + Metadados)
-    ├── bureau_full_delta/         ✅ PRONTO
-    ├── telco_delta/               ✅ PRONTO
-    └── cadastro_delta/            ✅ PRONTO
-    
-SILVER (Tipagem + Validação)
-    ├── bureau_full_silver_delta/  ✅ PRONTO
-    ├── telco_silver_delta/        ✅ PRONTO
-    └── cadastro_silver_delta/     ✅ PRONTO
-    
-GOLD (ABTs para Modelagem)
-    ├── abt_v1_delta/              ✅ PRONTO (Score_01)
-    ├── abt_v2_delta/              ✅ PRONTO (+ Score_02)
-    ├── abt_v3_delta/              ✅ PRONTO (+ Telco 68 vars)
-    ├── abt_v4_delta/              ✅ PRONTO (+ Cadastro 33 vars)
-    ├── abt_v5_delta/              ⏳ PRÓXIMO (+ Recarga)
-    └── abt_v6_delta/              ⏳ (+ Pagamento + Atraso)
+LANDING (Parquet Bruto)
+    │
+    ▼
+BRONZE (+ metadados)
+    ├── bureau_full_delta/
+    ├── telco_delta/
+    ├── cadastro_delta/
+    ├── recarga_delta/
+    ├── pagamento_delta/
+    └── atraso_delta/
+    │
+    ▼
+SILVER (tipado, validado)
+    ├── bureau_full_silver_delta/
+    ├── telco_silver_delta/
+    ├── cadastro_silver_delta/
+    ├── recarga_silver_delta/
+    ├── pagamento_silver_delta/
+    └── atraso_silver_delta/
+    │
+    ▼
+GOLD (Tabelas de Features)              GOLD (ABTs)
+    ├── recarga_features_v2_delta/          ├── abt_v1_delta/ (Score_01)
+    ├── pagamento_features_v2_delta/        ├── abt_v2_delta/ (+ Score_02)
+    └── atraso_features_v2_delta/           ├── abt_v3_delta/ (+ Telco 68 vars)
+                                            ├── abt_v4_delta/ (+ Cadastro 33 vars) → 185 cols
+                                            ├── abt_v5_v2_delta/ (+ Recarga M1/M3/M6) → 311 cols
+                                            └── abt_v6_v2_delta/ (+ Pagamento + Atraso) → 614 cols
 ```
 
 ---
 
-## ✅ O QUE JÁ FOI IMPLEMENTADO
+## Versões da ABT (Incremental)
 
-### **1️⃣ Bronze Layer - Ingestão**
-
-| Base | Script | Status | Descrição |
-|------|--------|--------|-----------|
-| **Bureau Full** | `00_ingest_bureau_full.py` | ✅ | Spine oficial (FLAG_INSTALACAO + FPD + SCORE_01/02) |
-| **Telco** | `01_ingest_telco.py` | ✅ | Features anonimizadas (var_26-93) com sentinela 304 |
-
-**Localização:** `src/jobs/00_bronze/`
-
-**O que faz:**
-- Lê dados brutos (Parquet) da Landing
-- Adiciona metadados de auditoria (data ingestão, origem, sistema)
-- Salva em Delta Lake (Bronze)
-- Registra tabelas no Unity Catalog
+| Versão | Features Adicionadas | Colunas | Status | KS Esperado |
+|--------|---------------------|---------|--------|-------------|
+| **v1** | Score_01 | ~10 | COMPLETO | ~33,1 |
+| **v2** | + Score_02 | ~12 | COMPLETO | ~34,5 |
+| **v3** | + Telco (68 vars) | ~82 | COMPLETO | ~36,0 |
+| **v4** | + Cadastro (33 vars) | 185 | COMPLETO | ~37,0 |
+| **v5 v2** | + Recarga (M1/M3/M6) | 311 | COMPLETO | ~37,5 |
+| **v6 v2** | + Pagamento + Atraso | **614** | **COMPLETO** | ~38,0+ |
 
 ---
 
-### **2️⃣ Silver Layer - Transformação**
+## Resultados da Execução do Pipeline
 
-| Base | Arquivo | Status | Descrição |
-|------|---------|--------|-----------|
-| **Bureau Full** | `00_bronze_silver_bureau.ipynb` | ✅ | Tipagem explícita, scores ajustados, deduplicação |
-| **Telco** | `01_bronze_silver_telco.py` | ✅ | Tipagem var_*, tratamento sentinela 304, flags missing |
-| **Cadastro** | `02_bronze_silver_cadastro.py` | ✅ | Parse tolerante datas, idade, CEP, var_* tipagem flexível |
+### Geradores de Features
 
-**Localização:** `src/jobs/01_silver/`
+| Camada | Entrada (Eventos) | Saída (Cliente-Mês) | Compressão | Colunas |
+|--------|-------------------|---------------------|------------|---------|
+| Recarga v2 | 95.210.519 | 32.882.218 | 2,9x | 51 |
+| Pagamento v2 | 21.821.465 | 12.634.799 | 1,7x | 49 |
+| Atraso v2 | 31.611.316 | 15.023.012 | 2,1x | 58 |
 
-**O que faz:**
-- Tipagem explícita (string → int/double)
-- Criação de variáveis derivadas (DT_SAFRA, flags de missing)
-- Tratamento de sentinelas (0 em Score_01, 304 em Telco)
-- Deduplicação garantindo grão 1:1 NUM_CPF + SAFRA
-- Validações de domínio (quality gates)
+### Construtores de ABT
 
-**Funções Reutilizáveis:** `src/utils/spark_utils.py`
-- `standardize_column_names()` - Padroniza para snake_case
-- `to_int_safe()` - Cast string→int seguro
-- `to_double_safe()` - Cast string→double com validação regex (tolera não-numéricos)
-- `to_date_safe()` - Parse tolerante de datas (inválidas → NULL)
-- `treat_sentinel_value()` - Trata sentinelas automaticamente
+| ABT | Registros | Colunas | Validação |
+|-----|-----------|---------|-----------|
+| v5 v2 | 3.795.310 | 311 | 11/11 gates PASSOU |
+| v6 v2 | 3.795.310 | 614 | Todos gates PASSOU |
 
----
+### Cobertura por Bloco de Features (Janela M1)
 
-### **3️⃣ Gold Layer - ABTs Incrementais**
+| Bloco de Features | Cobertura |
+|-------------------|-----------|
+| Score_01 | 98,18% |
+| Score_02 | 99,95% |
+| Telco | 35,46% |
+| Recarga M1 | 56,12% |
+| Pagamento M1 | 16,13% |
+| Atraso M1 | 21,79% |
 
-**v1 - Score_01 Baseline:**
+### Distribuição de Labels (ABT v6 Final)
 
-| Componente | Arquivo | Status | Descrição |
-|------------|---------|--------|-----------|
-| **Builder** | `00_gold_abt_builder.py` | ✅ | Orquestra build de ABT v1 |
-| **Validator** | `validators/validate_abt.py::validate_abt_v1()` | ✅ | 6 gates de validação automática |
-| **Docs Técnicas** | `docs/04_gold_rules/abt_v1.md` | ✅ | Especificação formal |
-| **Quick Start** | `docs/04_gold_rules/00_QUICK_START.md` | ✅ | Guia prático de uso |
-
-**v2 - Score_01 + Score_02:**
-
-| Componente | Arquivo | Status | Descrição |
-|------------|---------|--------|-----------|
-| **Builder** | `01_gold_abt_v2_builder.py` | ✅ | Estende v1 com Score_02 |
-| **Validator** | `validators/validate_abt.py::validate_abt_v2()` | ✅ | 7 gates (v1 + Gate 7 Score_02) |
-| **Docs Técnicas** | `docs/04_gold_rules/abt_v2.md` | ✅ | Especificação formal |
-
-**v3 - Score_01 + Score_02 + Telco (NOVO):**
-
-| Componente | Arquivo | Status | Descrição |
-|------------|---------|--------|-----------|
-| **Builder** | `02_gold_abt_v3_builder.py` | ✅ | Estende v2 com Telco (68 vars) |
-| **Validator** | `validators/validate_abt.py::validate_abt_v3()` | ✅ | 8 gates (v2 + Gate 8 Telco) |
-| **Docs Técnicas** | `docs/04_gold_rules/abt_v3.md` | ✅ | Especificação formal |
-
-**v4 - Score_01 + Score_02 + Telco + Cadastro (NOVO):**
-
-| Componente | Arquivo | Status | Descrição |
-|------------|---------|--------|-----------|
-| **Builder** | `03_gold_abt_v4_builder.py` | ✅ | Estende v3 com Cadastro (33 vars) |
-| **Validator** | `validators/validate_abt.py::validate_abt_v4()` | ✅ | 9 gates (v3 + Gate 9 Cadastro) |
-| **Docs Técnicas** | `docs/04_gold_rules/abt_v4.md` | ✅ | Especificação formal |
-
-**Localização:** `src/jobs/02_gold/`
-
-**ABT v1 Estrutura:**
-```
-Chaves:
-  ├── num_cpf
-  ├── safra (YYYYMM)
-  └── dt_safra
-
-Labels (Auditoria):
-  ├── flag_instalacao_int (decisão: 0/1)
-  └── fpd_int (target risco: 0/1)
-
-Features v1:
-  ├── score_01_adj (score histórico)
-  └── flag_score01_missing (sentinela)
-
-Metadados:
-  ├── prod, flag_mig2
-  └── versão, data build
-```
-
-**Validações Automáticas (6 Gates):**
-1. ✅ Unicidade 1:1 NUM_CPF + SAFRA
-2. ✅ FPD observado SÓ em FLAG_INSTALACAO=1
-3. ✅ Sem NULLs em chaves
-4. ✅ FLAG_INSTALACAO com valores 0 e 1
-5. ✅ FPD com valores 0 e 1 (balanceado)
-6. ✅ Score_01 com cobertura > 90%
+- **FLAG=1 (Aprovado):** 2.633.900 (69,40%)
+- **FLAG=0 (Reprovado):** 1.161.410 (30,60%)
+- **FPD=1 (em FLAG=1):** 559.229 (21,23%)
 
 ---
 
-### **4️⃣ Documentação**
+## Como Executar
 
-| Tipo | Localização | Status |
-|------|------------|--------|
-| **Data Dictionary** | `docs/01_data_dictionary/` | ✅ (bureau_full, telco, cadastro, pagamento, recarga, atraso) |
-| **Data Quality** | `docs/02_data_quality/` | ✅ (relatórios de qualidade) |
-| **Silver Rules** | `docs/03_silver_rules/` | ✅ (regras de transformação) |
-| **Gold Rules** | `docs/04_gold_rules/` | ✅ (v1, v2, v3 completos) |
-| **Glossário** | `docs/glossary_credit_risk.md` | ✅ |
-| **Target Definition** | `docs/target_definition.md` | ✅ (evento âncora + labels) |
-| **Overview** | `docs/00_overview.md` | ✅ (CRISP-DM + metodologia) |
-
----
-
-## 📈 Roadmap Incremental (v1→v6)
-
-**Estratégia:** Avaliação incremental de KS por bloco de features
-
-| Versão | Features | Status | KS Esperado | Próximas Ações |
-|--------|----------|--------|------------|---|
-| **v1** | Score_01 | ✅ PRONTO | ≈ 33,1 | Treinar modelo, medir KS |
-| **v2** | + Score_02 | ✅ PRONTO | ≈ 34.5 | Treinar, medir ΔKS vs v1 |
-| **v3** | + Telco (var_26-93) | ✅ PRONTO | ≈ 36.0 | Treinar, medir ΔKS vs v2 |
-| **v4** | + Cadastro (33 vars) | ✅ PRONTO | ≈ 37.0 | Treinar, medir ΔKS vs v3 |
-| **v5** | + Recarga | ⏳ Próximo | ≈ 37.5+ | Agregar events Recarga |
-| **v6** | + Pagamento + Atraso | ⏳ | ≈ 38.0+ | Agregar events Pag/Atraso |
-
----
-
-## 🚀 Como Usar
-
-### **Executar Gold v1, v2, v3, ou v4**
+### Pipeline Completo (Databricks)
 
 ```bash
-# Opção 1: Databricks Notebook
-%run /Workspace/src/jobs/02_gold/00_gold_abt_builder.py       # v1 (Score_01)
-%run /Workspace/src/jobs/02_gold/01_gold_abt_v2_builder.py    # v2 (+ Score_02)
-%run /Workspace/src/jobs/02_gold/02_gold_abt_v3_builder.py    # v3 (+ Telco)
-%run /Workspace/src/jobs/02_gold/03_gold_abt_v4_builder.py    # v4 (+ Cadastro)
+# Passo 1: Gerar features de Recarga (60+ features comportamentais)
+%run /Workspace/src/jobs/02_gold/gold_recarga_features_v2.py
 
-# Opção 2: Spark Submit (exemplo v4)
-spark-submit \
-  --py-files src/ \
-  src/jobs/02_gold/03_gold_abt_v4_builder.py
+# Passo 2: Construir ABT v5 (v4 + Recarga M1/M3/M6)
+%run /Workspace/src/jobs/02_gold/04_gold_abt_v5_builder_v2.py
 
-# Opção 3: Python direto
-python src/jobs/02_gold/03_gold_abt_v4_builder.py
+# Passo 3: Gerar features de Pagamento (50+ features)
+%run /Workspace/src/jobs/02_gold/gold_pagamento_features_v2.py
+
+# Passo 4: Gerar features de Atraso (60+ features)
+%run /Workspace/src/jobs/02_gold/gold_atraso_features_v2.py
+
+# Passo 5: Construir ABT v6 (v5 + Pagamento + Atraso) - FINAL
+%run /Workspace/src/jobs/02_gold/05_gold_abt_v6_builder_v2.py
 ```
 
-### **Saída Esperada**
+### Acessar ABT Final (SQL)
+
+```sql
+-- ABT final para modelagem (614 colunas)
+SELECT * FROM hackathon_2025.default.gold_abt_v6_v2;
+
+-- Tabelas de features
+SELECT * FROM hackathon_2025.default.gold_recarga_features_v2;
+SELECT * FROM hackathon_2025.default.gold_pagamento_features_v2;
+SELECT * FROM hackathon_2025.default.gold_atraso_features_v2;
+```
+
+### Caminhos Delta
 
 ```
->>> [Leitura] Carregando Silver Bureau (Spine)
->>> [Info] Registros no Silver Bureau: 1,200,000
-
->>> [Transform] Construindo ABT v1 (Score_01)...
->>> [Validate] Executando gates de qualidade...
-  [Gate 1] Unicidade: PASS
-  [Gate 2] FPD observado SÓ em FLAG=1: PASS
-  [Gate 3] Sem NULLs em chaves: PASS
-  [Gate 4] FLAG com 0 e 1: PASS
-  [Gate 5] FPD com 0 e 1: PASS
-  [Gate 6] Score_01 cobertura: PASS (100%)
-
->>> [Sucesso] Tabela salva: gold_abt_v1
-
-RELATÓRIO FINAL - ABT v1 (Score_01)
-FLAG_INSTALACAO (decisão observada):
-  FLAG=0: 500K (42%) - Reprovados
-  FLAG=1: 700K (58%) - Aprovados
-
-FPD (target, observado SÓ em FLAG=1):
-  FPD=0: 600K (86%) - Bom pagador
-  FPD=1: 100K (14%) - Risco
+/Volumes/hackathon_2025/default/gold/abt_v6_v2_delta/
+/Volumes/hackathon_2025/default/gold/abt_v5_v2_delta/
+/Volumes/hackathon_2025/default/gold/recarga_features_v2_delta/
+/Volumes/hackathon_2025/default/gold/pagamento_features_v2_delta/
+/Volumes/hackathon_2025/default/gold/atraso_features_v2_delta/
 ```
 
 ---
 
-## 🔒 Anti-Leakage Garantido
+## Principais Features por Bloco
 
-**Regras Críticas Implementadas:**
+### Recarga (Indicadores de Estresse Financeiro)
+- `freq_sos_m1` - Frequência de uso do SOS (empréstimo/adiantamento)
+- `pct_sos_sobre_credito_m1` - Razão SOS/Crédito
+- `coef_variacao_val_m1` - Instabilidade de valores
+- `dias_max_entre_recargas_m1` - Períodos de inatividade
+- `ticket_medio_m1` - Valor médio de recarga
 
-```python
-✗ FPD_INT NUNCA como feature (é o target!)
-✗ FLAG_INSTALACAO_INT NUNCA como feature (é leakage!)
-✓ Ambas incluídas SÓ para auditoria/swaps
-✓ Treino SÓ em FLAG_INSTALACAO=1 (onde FPD observado)
-```
+### Pagamento (Comportamento de Atraso Passado)
+- `pct_pagamentos_com_juros_m1` - % com juros (atrasos passados)
+- `flag_sempre_com_juros_m1` - Padrão de sempre pagar atrasado
+- `ratio_juros_pago_m1` - Intensidade de juros
+- `sum_val_juros_pos_m1` - Volume de juros pagos
+
+### Atraso (Risco Atual)
+- `pct_aging_90_plus_m1` - % inadimplência grave (>90 dias)
+- `flag_risco_alto_m1` - Flag WO/PDD/Fraude
+- `sum_val_aberto_m1` - Saldo em aberto
+- `ratio_aberto_faturado_m1` - Taxa de inadimplência
 
 ---
 
-## 📁 Estrutura do Projeto
+## Regras Anti-Vazamento (Anti-Leakage)
+
+| Coluna | Papel | Regra |
+|--------|-------|-------|
+| `fpd_int` | **TARGET** | NUNCA usar como feature |
+| `flag_instalacao_int` | **Decisão** | NUNCA usar como feature |
+
+**Treinamento:** Apenas em registros com `flag_instalacao_int=1` (onde FPD é observado)
+
+**Temporal:** Todas features comportamentais usam `safra_feature < safra` (apenas dados passados)
+
+---
+
+## Estrutura do Projeto
 
 ```
 hackathon-podAcademy-2025/
+│
+├── README.md                          # Este arquivo
+├── LICENSE
+├── .claude/                           # Configuração do assistente IA
+│   └── CLAUDE.md                      # Instruções para Claude Code
+│
+├── docs/                              # Toda documentação
+│   ├── README.md                      # Guia de navegação da documentação
+│   ├── 00_project/                    # Visão geral, target, glossário
+│   ├── 01_data_dictionary/            # Dicionários de dados por fonte
+│   ├── 02_data_quality/               # Relatórios de qualidade
+│   ├── 03_silver_rules/               # Regras de transformação Silver
+│   ├── 04_gold_rules/                 # Especificações ABT + book de variáveis
+│   ├── 05_abt_v5_docs/                # Documentação Recarga (ABT v5)
+│   ├── 06_abt_v6_docs/                # Documentação Pagamento/Atraso (ABT v6)
+│   ├── 07_troubleshooting/            # Guias de correção e diagnósticos
+│   └── 99_archive/                    # Documentação histórica/obsoleta
+│
 ├── src/
 │   ├── utils/
-│   │   ├── spark_utils.py              ← Funções reutilizáveis
-│   │   └── common.py
+│   │   ├── spark_utils.py             # Funções reutilizáveis
+│   │   └── validate_abt.py            # Gates de validação
 │   └── jobs/
-│       ├── 00_bronze/                  ← Ingestão (✅)
-│       │   ├── 00_ingest_bureau_full.py
-│       │   └── 01_ingest_telco.py
-│       ├── 01_silver/                  ← Transformação (✅)
-│       │   ├── 00_bronze_silver_bureau.ipynb
-│       │   └── 01_bronze_silver_telco.py
-│   └── 02_gold/                    ← ABTs (✅ v1, v2, v3)
-│           ├── 00_gold_abt_builder.py
-│           ├── 01_gold_abt_v2_builder.py
-│           ├── 02_gold_abt_v3_builder.py
-│           └── validators/
-│               └── validate_abt.py
+│       ├── 00_bronze/                 # Landing → Bronze
+│       ├── 01_silver/                 # Bronze → Silver
+│       └── 02_gold/
+│           ├── 00_gold_abt_builder.py        # ABT v1
+│           ├── 01_gold_abt_v2_builder.py     # ABT v2
+│           ├── 02_gold_abt_v3_builder.py     # ABT v3
+│           ├── 03_gold_abt_v4_builder.py     # ABT v4
+│           ├── 04_gold_abt_v5_builder_v2.py  # ABT v5 v2
+│           ├── 05_gold_abt_v6_builder_v2.py  # ABT v6 v2
+│           ├── gold_recarga_features_v2.py   # Features Recarga (60+)
+│           ├── gold_pagamento_features_v2.py # Features Pagamento (50+)
+│           └── gold_atraso_features_v2.py    # Features Atraso (60+)
 │
-├── docs/
-│   ├── 00_overview.md                  ← Metodologia CRISP-DM
-│   ├── target_definition.md            ← Labels + Timeline
-│   ├── glossary_credit_risk.md
-│   ├── 01_data_dictionary/             ← Dicionários
-│   ├── 02_data_quality/                ← Relatórios QA
-│   ├── 03_silver_rules/                ← Regras transformação
-│   └── 04_gold_rules/                  ← Especificação ABTs
-│       ├── abt_v1.md
-│       └── 00_QUICK_START.md
-│
-├── notebooks/
-│   ├── AED_*.ipynb                     ← Análises exploratórias
-│   └── 20260106 - EDA Inicial/         ← EDAs por base
-│
-├── ANALISE_GOLD_v1.md                  ← Análise estratégica
-├── IMPLEMENTATION_SUMMARY.txt          ← Resumo implementação
-├── README.md                           ← Este arquivo
-└── LICENSE
-
+├── notebooks/                         # Notebooks Jupyter
+├── tests/                             # Suite de testes
+├── infrastructure/                    # Configurações de infraestrutura
+└── astro_airflow/                     # DAGs do Airflow
 ```
 
 ---
 
-## ⏳ Próximos Passos (Fase 2)
+## Documentação
 
-### **Imediato (Próximas semanas)**
-
-1. **Treinar modelos com v1, v2, v3**
-   ```bash
-   python src/jobs/02_gold/00_gold_abt_builder.py       # v1: Score_01
-   python src/jobs/02_gold/01_gold_abt_v2_builder.py    # v2: + Score_02
-   python src/jobs/02_gold/02_gold_abt_v3_builder.py    # v3: + Telco (68 vars)
-   ```
-
-2. **Validar 8 gates de qualidade para v3**
-   - ✅ Gates 1-6: Iguais a v1 (unicidade, FPD, chaves, labels, Score_01)
-   - ✅ Gate 7: Score_02 cobertura > 50%
-   - ✅ Gate 8: Telco cobertura > 20% (fonte complementar)
-   - Todos devem passar
-
-3. **Medir KS incremental**
-   - Treinar v1: Medir KS baseline (esperado ≈ 33,1)
-   - Treinar v2: Calcular ΔKS = KS_v2 - KS_v1 (impacto Score_02)
-   - Treinar v3: Calcular ΔKS = KS_v3 - KS_v2 (impacto Telco 68 vars)
-
-4. **Documentar ganhos**
-   - Feature importance por versão
-   - Qual feature contribui mais
-   - Decisões para v4+
-
-### **Médio Prazo (Próximos dias)**
-
-5. **Criar ABT v4 (Cadastro)**
-   - Silver Cadastro já está pronto ✅
-   - Criar `03_gold_abt_v4_builder.py`
-   - LEFT JOIN: v3 + Cadastro (var_02-25, edad, CEP)
-   - Validação: Gate 9 (Cadastro cobertura > 30%)
-   - Medir ΔKS = KS_v4 - KS_v3
-
-6. **Criar ABT v5 (Recarga)**
-   - Implementar Silver Recarga (agregação temporal)
-   - Criar `04_gold_abt_v5_builder.py`
-   - LEFT JOIN: v4 + Recarga (features de evento)
-   - Medir ΔKS = KS_v5 - KS_v4
-
-7. **Criar ABT v6 (Pagamento + Atraso)**
-   - Implementar Silver Pagamento e Atraso
-   - Criar `05_gold_abt_v6_builder.py`
-   - LEFT JOIN: v5 + Pagamento + Atraso
-   - Medir ΔKS = KS_v6 - KS_v5
-
-### **Longo Prazo (Próximas semana)**
-
-8. **Documentar ganhos incrementais (v1-v6)**
-    - Tabela: Versão | KS | ΔKS | Features Adicionadas
-    - Feature importance acumulada
-    - Trade-off: complexidade vs ganho marginal
-    - Decisão final: qual versão usar em produção?
-
-9. **Análise de Swaps e Impacto**
-    - Quantos cliente muda de aprovação/reprovação por versão?
-    - Estimativa de revenue impact
-    - Recomendação de roll-out strategy
-
-10. **Preparação para Produção**
-    - Pipeline automatizado (Databricks Jobs)
-    - Monitoring de data quality
-    - Retraining strategy (mensal/trimestral)
-    - Governance e audit trail
+| Documento | Localização | Descrição |
+|-----------|-------------|-----------|
+| **Guia de Navegação** | `docs/README.md` | Como encontrar documentação |
+| **Book de Variáveis** | `docs/04_gold_rules/BOOK_VARIABLES_ABT_V6.md` | Dicionário completo (614 vars) |
+| **Definição de Target** | `docs/00_project/target_definition.md` | Labels + regras anti-vazamento |
+| **Visão Geral** | `docs/00_project/overview.md` | Metodologia CRISP-DM |
+| **Glossário** | `docs/00_project/glossary.md` | Termos de risco de crédito |
+| **Dicionários de Dados** | `docs/01_data_dictionary/` | Schemas das fontes |
+| **Troubleshooting** | `docs/07_troubleshooting/` | Guias de correção de problemas |
 
 ---
 
-## 📚 Documentação de Referência
+## Status do Projeto
 
-### **Para entender o projeto:**
-1. [Overview CRISP-DM](docs/00_overview.md) - Metodologia e estrutura
-2. [Target Definition](docs/target_definition.md) - Labels e timeline
-3. [Glossário](docs/glossary_credit_risk.md) - Conceitos de risco
+### Engenharia de Dados - COMPLETO
+- [x] Bronze/Silver: bureau, telco, cadastro, recarga, pagamento, atraso
+- [x] Gold ABT: v1-v6 implementadas
+- [x] Recarga v2: 60+ features comportamentais
+- [x] Pagamento v2: 50+ features de pagamento
+- [x] Atraso v2: 60+ features de atraso
+- [x] ABT v6 v2: 614 colunas, todos gates PASSOU
+- [x] Book de Variáveis documentado
 
-### **Para dados específicos:**
-- [Data Dictionary](docs/01_data_dictionary/) - Schema e tipos
-- [Data Quality](docs/02_data_quality/) - Relatórios de qualidade
-- [Silver Rules](docs/03_silver_rules/) - Regras de transformação
-
-### **Para implementação Gold v1:**
-- [Quick Start](docs/04_gold_rules/00_QUICK_START.md) - Como rodar
-- [ABT v1 Specs](docs/04_gold_rules/abt_v1.md) - Especificação formal
-- [Implementation Summary](IMPLEMENTATION_SUMMARY.txt) - Resumo
-
----
-
-## 🔍 Key Decisions
-
-### **1. Spine Oficial: Bureau_Full (v2)**
-✅ Inclui reprovados (FLAG_INSTALACAO=0/1)
-✅ FPD observado SÓ em FLAG=1
-✅ Grão 1:1 NUM_CPF + SAFRA
-
-### **2. Roadmap Incremental: Score_01 → v6**
-✅ Começar com score histórica
-✅ Adicionar Score_02 como validação
-✅ Depois features externas (Telco→Cadastro→...)
-
-### **3. Validações Automáticas: 6 Gates**
-✅ Garantem qualidade sem intervalo manual
-✅ Previnem leakage
-✅ Rastreabilidade completa
+### Modelagem - PRÓXIMOS PASSOS
+- [ ] Seleção de features (reduzir 614 → top features)
+- [ ] Split Train/Test/OOT por SAFRA
+- [ ] Modelo baseline (Regressão Logística)
+- [ ] Modelo XGBoost/LightGBM
+- [ ] Avaliação KS por versão da ABT (lift incremental)
+- [ ] Interpretação do modelo (SHAP)
 
 ---
 
-## 📞 Suporte & Dúvidas
+## Split Train/Test/OOT (Recomendado)
 
-Para dúvidas sobre:
-- **Pipeline:** Ver scripts em `src/jobs/`
-- **Dados:** Ver documentação em `docs/`
-- **Gold v1:** Ver `docs/04_gold_rules/00_QUICK_START.md`
-- **Features futuras:** Ver `ANALISE_GOLD_v1.md`
+```python
+# Filtrar apenas clientes aprovados (onde FPD é observado)
+df_train_eligible = df_abt.filter(F.col("flag_instalacao_int") == 1)
 
----
+# Split temporal por SAFRA
+df_train = df_train_eligible.filter(F.col("safra") < "202402")  # Até Jan 2024
+df_test = df_train_eligible.filter(F.col("safra") == "202402")  # Fev 2024
+df_oot = df_train_eligible.filter(F.col("safra") == "202403")   # Mar 2024 (OOT)
 
-## ✨ Status Resumido
+# Target
+target = "fpd_int"
 
-| Componente | Status | Documentação |
-|------------|--------|--------------|
-| Bronze Bureau | ✅ | ✅ |
-| Bronze Telco | ✅ | ✅ |
-| Bronze Cadastro | ✅ | ✅ |
-| Silver Bureau | ✅ | ✅ |
-| Silver Telco | ✅ | ✅ |
-| Silver Cadastro | ✅ | ✅ |
-| Gold v1 (Score_01) | ✅ | ✅ |
-| Gold v2 (+ Score_02) | ✅ | ✅ |
-| Gold v3 (+ Telco 68 vars) | ✅ | ✅ |
-| Gold v4+ | ⏳ | 📋 |
-| Funções Reutilizáveis | ✅ | ✅ |
-| Modelagem & KS | ⏳ | 📋 |
+# Excluir das features
+exclude_cols = ["num_cpf", "safra", "dt_safra", "fpd_int", "flag_instalacao_int",
+                "prod", "flag_mig2", "abt_version", "build_date", "spine_version",
+                "gold_version", "gold_build_date"]
+```
 
 ---
 
-## 📄 Licença
+## Top Features para Modelagem (Recomendadas)
 
-[Consulte LICENSE](LICENSE)
+| Rank | Feature | Bloco | Relevância |
+|------|---------|-------|------------|
+| 1 | `score_01` | Score | Score de bureau baseline |
+| 2 | `freq_sos_m1` | Recarga | Estresse financeiro |
+| 3 | `pct_aging_90_plus_m1` | Atraso | Inadimplência grave |
+| 4 | `pct_pagamentos_com_juros_m1` | Pagamento | Comportamento de atraso |
+| 5 | `flag_risco_alto_m1` | Atraso | WO/PDD/Fraude |
+| 6 | `coef_variacao_val_m1` | Recarga | Instabilidade de valores |
+| 7 | `sum_val_aberto_m1` | Atraso | Saldo em aberto |
+| 8 | `ratio_juros_pago_m1` | Pagamento | Intensidade de juros |
+| 9 | `dias_max_entre_recargas_m1` | Recarga | Inatividade |
+| 10 | `ticket_medio_m1` | Recarga | Capacidade de pagamento |
 
 ---
 
-**Última atualização:** 21 jan 2026 | **Versão:** 1.1 | **Status:** v1/v2/v3 ✅ | **Próximo:** v4 Cadastro
+## Regra de Negócio do SOS
+
+> **SOS é um empréstimo/adiantamento (R$3-20, tipicamente R$5) descontado da próxima recarga. SOS e bônus NÃO contam como "dinheiro real". Alta frequência de SOS = indicador de estresse financeiro.**
+
+---
+
+## Licença
+
+[Ver LICENSE](LICENSE)
+
+---
+
+**Última Atualização:** 30 Jan 2026 | **Versão:** 3.0 | **Status:** Engenharia de Dados COMPLETO | **Próximo:** Modelagem

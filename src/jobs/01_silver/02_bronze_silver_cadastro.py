@@ -101,37 +101,29 @@ def build_silver(df_bronze):
     )
 
     # 3) Parse tolerante de DATADENASCIMENTO → DT_NASC
-    # Trata valores inválidos (ex: "2807") graciosamente (retorna NULL)
-    # Usando F.to_date() com tratamento de erro via estrutura robusta
-    print(">>> [Transform] Parseando DATADENASCIMENTO com tolerância a inválidos...")
-    
-    # Helper: função de parse seguro de data
-    def safe_parse_date(date_str, date_format="dd/MM/yyyy"):
-        """
-        UDF para parser seguro de datas. Retorna NULL em caso de erro.
-        """
-        if date_str is None or date_str.strip() == "":
-            return None
-        try:
-            from datetime import datetime
-            return datetime.strptime(date_str.strip(), date_format).date()
-        except:
-            return None
-    
-    # Registrar UDF
-    from pyspark.sql.types import DateType
-    safe_parse_date_udf = F.udf(safe_parse_date, DateType())
-    
-    # Aplicar parse seguro
+    # Usa to_date() do Spark (nativo, sem UDF) para garantir execução distribuída
+    # Evita problemas de serialização de UDFs em ambientes Databricks/Unity Catalog
+    print(">>> [Transform] Parseando DATADENASCIMENTO com to_date() nativo do Spark...")
+
+    # Tentar múltiplos formatos de data (tolerante a variações no formato)
+    # F.coalesce retorna o primeiro valor não-NULL encontrado
     df = df.withColumn(
         "dt_nasc",
-        F.when(
-            F.col("datadenascimento").isNotNull() & (F.trim(F.col("datadenascimento")) != F.lit("")),
-            safe_parse_date_udf(F.col("datadenascimento"))
-        ).otherwise(None)
+        F.coalesce(
+            # Formato padrão: dd/MM/yyyy (ex: 15/03/1985)
+            F.to_date(F.col("datadenascimento"), "dd/MM/yyyy"),
+            # Formato alternativo: dd-MM-yyyy (ex: 15-03-1985)
+            F.to_date(F.col("datadenascimento"), "dd-MM-yyyy"),
+            # Formato alternativo: yyyy-MM-dd (ex: 1985-03-15)
+            F.to_date(F.col("datadenascimento"), "yyyy-MM-dd"),
+            # Formato alternativo: ddMMyyyy (ex: 15031985)
+            F.to_date(F.col("datadenascimento"), "ddMMyyyy"),
+            # Se nenhum formato funcionar, retorna NULL
+            F.lit(None).cast("date")
+        )
     )
-    
-    # Flag de data inválida (preenchida mas não faz parse)
+
+    # Flag de data inválida (preenchida mas não conseguiu fazer parse)
     df = df.withColumn(
         "flag_dt_nasc_invalida",
         F.when(
