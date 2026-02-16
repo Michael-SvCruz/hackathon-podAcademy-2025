@@ -216,3 +216,5 @@ informacoes_adicionais/
 docs/00_execution_outputs_reports/
 
 .claude
+
+src/jobs/04_modeling/

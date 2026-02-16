@@ -1,0 +1,60 @@
+# ============================================
+# OCI Authentication
+# ============================================
+# Obter no Console OCI > Identity > Users > User Details
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaaaaaXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+user_ocid        = "ocid1.user.oc1..aaaaaaaXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+# Obter no Console OCI > Identity > Users > API Keys > Fingerprint
+fingerprint      = "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
+
+# Caminho para a chave privada OCI (gerada junto com API Key)
+private_key_path = "~/.oci/oci_api_key.pem"
+
+# Região OCI (default: São Paulo)
+region           = "sa-saopaulo-1"
+
+# ============================================
+# Project Configuration
+# ============================================
+project_name           = "hackathon-2025"
+environment            = "prod"
+root_compartment_name  = "hackathon-2025"
+
+# ============================================
+# Network Configuration
+# ============================================
+vcn_cidr_block               = "10.0.0.0/16"
+public_subnet_cidr           = "10.0.1.0/24"
+private_data_subnet_cidr     = "10.0.2.0/24"
+private_app_subnet_cidr      = "10.0.3.0/24"
+
+# ============================================
+# Storage Configuration
+# ============================================
+enable_lifecycle_policies = false  # true para arquivar após 60 dias
+
+# ============================================
+# Compute Configuration - Data Flow
+# ============================================
+# OCPU por executor (não total)
+dataflow_bronze_ocpu   = 2   # Bronze: 10 OCPU total (1 driver + 2 executors × 2 OCPU)
+dataflow_silver_ocpu   = 4   # Silver: 36 OCPU total (1 driver + 2 executors × 4 OCPU)
+dataflow_gold_ocpu     = 4   # Gold: 68 OCPU total (1 driver + 2 executors × 4 OCPU)
+dataflow_abt_ocpu      = 4   # ABT: 36 OCPU total (1 driver + 2 executors × 4 OCPU)
+
+# Número de executors por aplicação
+dataflow_bronze_executors  = 4
+dataflow_silver_executors  = 8
+dataflow_gold_executors    = 16
+dataflow_abt_executors     = 8
+
+# ============================================
+# Tags
+# ============================================
+tags = {
+  Project     = "Hackathon-PodAcademy-2025"
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+  Owner       = "Data-Team"
+}
