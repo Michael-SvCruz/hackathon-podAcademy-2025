@@ -55,23 +55,14 @@ module "storage" {
 # ============================================
 # FASE 4: Compute (Data Flow Applications)
 # ============================================
-# Descomentar quando iniciar Fase 4:
-#
-# module "compute" {
-#   source = "../../modules/compute"
-#
-#   compute_compartment_id    = module.iam.compute_compartment_id
-#   bucket_landing_zone       = module.storage.bucket_landing_zone
-#   bucket_bronze_layer       = module.storage.bucket_bronze_layer
-#   bucket_silver_layer       = module.storage.bucket_silver_layer
-#   bucket_gold_layer         = module.storage.bucket_gold_layer
-#   dataflow_bronze_ocpu      = var.dataflow_bronze_ocpu
-#   dataflow_silver_ocpu      = var.dataflow_silver_ocpu
-#   dataflow_gold_ocpu        = var.dataflow_gold_ocpu
-#   dataflow_abt_ocpu         = var.dataflow_abt_ocpu
-#   dataflow_bronze_executors = var.dataflow_bronze_executors
-#   dataflow_silver_executors = var.dataflow_silver_executors
-#   dataflow_gold_executors   = var.dataflow_gold_executors
-#   dataflow_abt_executors    = var.dataflow_abt_executors
-#   tags                      = var.tags
-# }
+module "compute" {
+  source = "../../modules/compute"
+
+  compute_compartment_id = module.iam.compute_compartment_id
+  namespace              = module.storage.namespace
+  bucket_landing_zone    = module.storage.bucket_landing_zone
+  dataflow_applications  = var.dataflow_applications
+  project_name           = var.project_name
+  spark_version          = "3.5.0"
+  tags                   = var.tags
+}

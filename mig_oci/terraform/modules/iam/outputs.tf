@@ -39,6 +39,11 @@ output "security_compartment_id" {
   value       = oci_identity_compartment.security.id
 }
 
+output "dev_teste_compartment_id" {
+  description = "OCID do compartment dev-teste (sandbox isolado para o time)"
+  value       = oci_identity_compartment.dev_teste.id
+}
+
 # --- Group IDs ---
 
 output "administrators_group_id" {
@@ -54,4 +59,9 @@ output "data_engineers_group_id" {
 output "data_scientists_group_id" {
   description = "OCID do grupo de cientistas de dados"
   value       = oci_identity_group.data_scientists.id
+}
+
+output "developers_group_id" {
+  description = "OCID do grupo de developers (sandbox dev-teste)"
+  value       = oci_identity_group.developers.id
 }

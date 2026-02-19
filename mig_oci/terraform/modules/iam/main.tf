@@ -24,7 +24,8 @@ terraform {
 #     ├── storage
 #     ├── compute
 #     ├── data
-#     └── security
+#     ├── security
+#     └── dev-teste (sandbox isolado para o time)
 
 
 # ============================================
@@ -96,6 +97,20 @@ resource "oci_identity_compartment" "security" {
   freeform_tags = var.tags
 }
 
+# Sub-compartment: Dev-Teste
+# Sandbox isolado para os integrantes do time explorarem a OCI.
+# Recursos criados aqui NÃO afetam os compartments de produção.
+resource "oci_identity_compartment" "dev_teste" {
+  compartment_id = oci_identity_compartment.project.id
+  name           = "dev-teste"
+  description    = "Sandbox isolado para o time testar e explorar a OCI sem afetar producao"
+  enable_delete  = true
+
+  freeform_tags = merge(var.tags, {
+    "ambiente" = "dev-teste"
+  })
+}
+
 
 # ============================================
 # 2. GROUPS (Grupos de Usuários)
@@ -126,6 +141,15 @@ resource "oci_identity_group" "data_scientists" {
   compartment_id = var.tenancy_ocid
   name           = "${var.project_name}-data-scientists"
   description    = "Cientistas de dados - notebooks e modelos"
+
+  freeform_tags = var.tags
+}
+
+# Developers - integrantes do time com acesso ao sandbox dev-teste
+resource "oci_identity_group" "developers" {
+  compartment_id = var.tenancy_ocid
+  name           = "${var.project_name}-developers"
+  description    = "Integrantes do time - acesso ao sandbox dev-teste para explorar a OCI"
 
   freeform_tags = var.tags
 }
@@ -222,5 +246,42 @@ resource "oci_identity_policy" "dataflow_service" {
 
     # Data Flow precisa acessar a rede (subnets)
     "Allow service dataflow to use virtual-network-family in compartment ${var.project_name}",
+  ]
+}
+
+
+# ============================================
+# 4. POLICIES DEV-TESTE (Sandbox Isolado)
+# ============================================
+# Developers têm acesso total DENTRO do dev-teste, mas apenas
+# leitura nos recursos de produção. Isso permite que explorem
+# a OCI livremente sem risco de afetar o pipeline principal.
+
+# Policy: Developers - acesso total ao sandbox dev-teste
+# Criada no nível do projeto para que "dev-teste" seja visível como sub-compartment
+resource "oci_identity_policy" "developers_sandbox" {
+  compartment_id = oci_identity_compartment.project.id
+  name           = "${var.project_name}-developers-sandbox-policy"
+  description    = "Acesso total para developers no sandbox dev-teste"
+
+  statements = [
+    # Acesso total dentro do dev-teste: criar VMs, buckets, redes, etc.
+    "Allow group ${oci_identity_group.developers.name} to manage all-resources in compartment dev-teste"
+  ]
+}
+
+# Policy: Developers - leitura nos buckets de produção
+# Permite que consultem dados da ABT para testes, sem poder modificar
+resource "oci_identity_policy" "developers_read_prod" {
+  compartment_id = oci_identity_compartment.project.id
+  name           = "${var.project_name}-developers-read-prod-policy"
+  description    = "Leitura nos buckets de producao para developers"
+
+  statements = [
+    # Ler dados dos buckets de producao (bronze, silver, gold, models)
+    "Allow group ${oci_identity_group.developers.name} to read object-family in compartment storage",
+
+    # Inspecionar rede (necessario para entender a topologia)
+    "Allow group ${oci_identity_group.developers.name} to read virtual-network-family in compartment network",
   ]
 }

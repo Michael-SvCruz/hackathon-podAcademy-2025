@@ -65,14 +65,8 @@ output "storage_info" {
 
 
 # --- Fase 4: Compute ---
-# Descomentar quando iniciar Fase 4:
-#
-# output "dataflow_applications" {
-#   description = "IDs das aplicacoes Data Flow"
-#   value = {
-#     bronze_id = module.compute.dataflow_bronze_id
-#     silver_id = module.compute.dataflow_silver_id
-#     gold_id   = module.compute.dataflow_gold_id
-#     abt_id    = module.compute.dataflow_abt_id
-#   }
-# }
+
+output "dataflow_applications" {
+  description = "IDs das aplicações Data Flow"
+  value       = module.compute.dataflow_application_ids
+}

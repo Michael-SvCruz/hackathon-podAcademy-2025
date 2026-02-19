@@ -412,7 +412,7 @@ mig_oci/
 | **Fase 1** | ✅ Aplicada | IAM (6 compartments, 3 groups, 4 policies) | Fase 0 |
 | **Fase 2** | ✅ Aplicada | Network (VCN, 3 subnets, 3 gateways) | Fase 1 |
 | **Fase 3** | ✅ Aplicada | Storage (6 buckets Object Storage) | Fase 1 |
-| **Fase 4** | ⏳ Aguardando | Compute (4 Data Flow applications) | Fases 1-3 |
+| **Fase 4** | ✅ Aplicada | Compute (4 Data Flow applications) | Fases 1, 3 |
 | **Fase 5** | ⏳ Opcional | Security (Vault + Master Key) | Fase 1 |
 | **Fase 6** | ⏳ Aguardando | Upload de dados + scripts Python | Fase 3 |
 

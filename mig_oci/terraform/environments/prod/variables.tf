@@ -98,50 +98,42 @@ variable "enable_lifecycle_policies" {
 
 # --- Compute (Fase 4) ---
 
-variable "dataflow_bronze_ocpu" {
-  description = "OCPU por executor do Data Flow Bronze"
-  type        = number
-  default     = 2
-}
+variable "dataflow_applications" {
+  description = "Mapa de aplicações Data Flow"
+  type = map(object({
+    display_name  = string
+    script_name   = string
+    ocpu          = number
+    num_executors = number
+  }))
+  default = {
+    # Bronze (leve: 2 OCPU, 4 executors)
+    bronze-bureau    = { display_name = "bronze-bureau",    script_name = "bronze_bureau.py",    ocpu = 2, num_executors = 4 }
+    bronze-telco     = { display_name = "bronze-telco",     script_name = "bronze_telco.py",     ocpu = 2, num_executors = 4 }
+    bronze-cadastro  = { display_name = "bronze-cadastro",  script_name = "bronze_cadastro.py",  ocpu = 2, num_executors = 4 }
+    bronze-recarga   = { display_name = "bronze-recarga",   script_name = "bronze_recarga.py",   ocpu = 2, num_executors = 4 }
+    bronze-pagamento = { display_name = "bronze-pagamento", script_name = "bronze_pagamento.py", ocpu = 2, num_executors = 4 }
+    bronze-atraso    = { display_name = "bronze-atraso",    script_name = "bronze_atraso.py",    ocpu = 2, num_executors = 4 }
 
-variable "dataflow_silver_ocpu" {
-  description = "OCPU por executor do Data Flow Silver"
-  type        = number
-  default     = 4
-}
+    # Silver (médio: 4 OCPU, 8 executors)
+    silver-bureau    = { display_name = "silver-bureau",    script_name = "silver_bureau.py",    ocpu = 4, num_executors = 8 }
+    silver-telco     = { display_name = "silver-telco",     script_name = "silver_telco.py",     ocpu = 4, num_executors = 8 }
+    silver-cadastro  = { display_name = "silver-cadastro",  script_name = "silver_cadastro.py",  ocpu = 4, num_executors = 8 }
+    silver-recarga   = { display_name = "silver-recarga",   script_name = "silver_recarga.py",   ocpu = 4, num_executors = 8 }
+    silver-pagamento = { display_name = "silver-pagamento", script_name = "silver_pagamento.py", ocpu = 4, num_executors = 8 }
+    silver-atraso    = { display_name = "silver-atraso",    script_name = "silver_atraso.py",    ocpu = 4, num_executors = 8 }
 
-variable "dataflow_gold_ocpu" {
-  description = "OCPU por executor do Data Flow Gold"
-  type        = number
-  default     = 4
-}
+    # Gold Features (pesado: 4 OCPU, 16 executors)
+    gold-recarga     = { display_name = "gold-recarga",     script_name = "gold_recarga.py",     ocpu = 4, num_executors = 16 }
+    gold-pagamento   = { display_name = "gold-pagamento",   script_name = "gold_pagamento.py",   ocpu = 4, num_executors = 16 }
+    gold-atraso      = { display_name = "gold-atraso",      script_name = "gold_atraso.py",      ocpu = 4, num_executors = 16 }
 
-variable "dataflow_abt_ocpu" {
-  description = "OCPU por executor do Data Flow ABT"
-  type        = number
-  default     = 4
-}
-
-variable "dataflow_bronze_executors" {
-  description = "Numero de executors do Data Flow Bronze"
-  type        = number
-  default     = 4
-}
-
-variable "dataflow_silver_executors" {
-  description = "Numero de executors do Data Flow Silver"
-  type        = number
-  default     = 8
-}
-
-variable "dataflow_gold_executors" {
-  description = "Numero de executors do Data Flow Gold"
-  type        = number
-  default     = 16
-}
-
-variable "dataflow_abt_executors" {
-  description = "Numero de executors do Data Flow ABT"
-  type        = number
-  default     = 8
+    # ABT Builders (médio: 4 OCPU, 8 executors)
+    abt-v1           = { display_name = "abt-v1",           script_name = "abt_v1_builder.py",   ocpu = 4, num_executors = 8 }
+    abt-v2           = { display_name = "abt-v2",           script_name = "abt_v2_builder.py",   ocpu = 4, num_executors = 8 }
+    abt-v3           = { display_name = "abt-v3",           script_name = "abt_v3_builder.py",   ocpu = 4, num_executors = 8 }
+    abt-v4           = { display_name = "abt-v4",           script_name = "abt_v4_builder.py",   ocpu = 4, num_executors = 8 }
+    abt-v5           = { display_name = "abt-v5",           script_name = "abt_v5_builder.py",   ocpu = 4, num_executors = 8 }
+    abt-v6           = { display_name = "abt-v6",           script_name = "abt_v6_builder.py",   ocpu = 4, num_executors = 8 }
+  }
 }
