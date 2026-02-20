@@ -125,13 +125,15 @@
 
 | # | Nome | E-mail OCI | Grupos Atribuídos | Criado em |
 |---|------|------------|-------------------|-----------|
-| 1 | | | | |
-| 2 | | | | |
-| 3 | | | | |
-| 4 | | | | |
-| 5 | | | | |
-| 6 | | | | |
-| 7 | | | | |
+| 1 |Michael Cruz|sv_yaco@hotmail.com|hackathon-2025-administrators|20/02/2026|
+| 2 |Clarice Gouveia|clagouveia@gmail.com|hackathon-2025-developers|20/02/2026|
+| 3 |Lucas Melo| | | |
+| 4 |Cleben Garcia|clebenjuniorcgarcia@hotmail.com|hackathon-2025-developers|20/02/2026|
+| 5 |Eric Chao | | | |
+| 6 |Silvana Amaral|silvanaamaralpe@gmail.com|hackathon-2025-data-engineers , hackathon-2025-developers|20/02/2026|
+| 7 |Alisson Silva|alisson.junio@hotmail.com|hackathon-2025-data-engineers , hackathon-2025-developers|20/02/2026|
+| 8 |Eduardo Andrechuk|eduardoandrechuk@outlook.com|hackathon-2025-data-scientists , hackathon-2025-developers|20/02/2026|
+
 
 ---
 
