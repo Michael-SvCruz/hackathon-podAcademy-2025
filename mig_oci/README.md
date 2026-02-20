@@ -1,140 +1,219 @@
 # Migração OCI - Hackathon PodAcademy 2025
 
-Migração do projeto de Databricks/AWS para Oracle Cloud Infrastructure (OCI) usando Terraform.
+Migração do projeto de Databricks para Oracle Cloud Infrastructure (OCI) usando Terraform e OCI Data Flow (Spark gerenciado).
 
-## Status Atual
+## Status das Fases
 
-✅ **Fase 0 (Setup):** Arquivos de configuração criados
-⏳ **Fase 1 (IAM):** Aguardando implementação
-⏳ **Fase 2 (Network):** Aguardando implementação
-⏳ **Fase 3 (Storage):** Aguardando implementação
-⏳ **Fase 4 (Compute):** Aguardando implementação
-⏳ **Fase 5 (Security):** Opcional
-⏳ **Fase 6 (Upload):** Aguardando implementação
+| Fase | Status | Recursos |
+|------|--------|----------|
+| **Fase 0** | ✅ Concluída | Setup: Provider OCI v5.47.0, backend local, credenciais validadas |
+| **Fase 1** | ✅ Aplicada | IAM: 6 compartments, 4 grupos, políticas de acesso |
+| **Fase 2** | ✅ Aplicada | Network: VCN, 3 subnets, 3 gateways, 2 route tables, 2 security lists |
+| **Fase 3** | ✅ Aplicada | Storage: 6 buckets (landing-zone, bronze, silver, gold, models, tfstate) |
+| **Fase 4** | ✅ Aplicada | Compute: 21 Data Flow Applications (for_each dinâmico) |
+| **Fase 5** | ⏳ Opcional | Security: Vault + Master Key |
+| **Fase 6A** | ✅ Concluída | Landing → Bronze: 6 scripts adaptados, testados e executados no Data Flow |
+| **Fase 6B** | ⏳ Em andamento | Silver → Gold → ABT: scripts prontos, falta executar no Data Flow |
+
+---
 
 ## Quick Start
 
 ### 1. Configurar Credenciais OCI
 
 ```bash
-# 1.1. Copiar template de configuração
-cd terraform/environments/prod
+cd mig_oci/terraform/environments/prod
 cp terraform.tfvars.example terraform.tfvars
-
-# 1.2. Editar terraform.tfvars com suas credenciais OCI
-# - tenancy_ocid: Console OCI > Tenancy Details
-# - user_ocid: Console OCI > Identity > Users > seu usuário
-# - fingerprint: Console OCI > Identity > Users > API Keys
-# - private_key_path: Caminho para chave .pem (gerada com API Key)
-nano terraform.tfvars
+# Editar terraform.tfvars com suas credenciais OCI
 ```
 
-### 2. Inicializar Terraform
+### 2. Inicializar e Aplicar
 
 ```bash
-cd ../../scripts
-./init.sh
+cd mig_oci/terraform/scripts
+./init.sh              # Validar credenciais + inicializar
+./apply_phase.sh 1     # Aplicar fase específica
 ```
 
-**Saída esperada:**
-```
-✅ Terraform inicializado com sucesso!
-```
-
-### 3. Executar Fases Incrementalmente
+### 3. Upload de Scripts
 
 ```bash
-# Fase 1: IAM (Compartments + Grupos) - 30 min
-./apply_phase.sh 1
-
-# Fase 2: Network (VCN + Subnets) - 45 min
-./apply_phase.sh 2
-
-# Fase 3: Storage (Buckets + State Remoto) - 30 min
-./apply_phase.sh 3
-./migrate_state_to_remote.sh
-
-# Fase 4: Compute (Data Flow Applications) - 2-3h
-./apply_phase.sh 4
-
-# Fase 5: Security (Vault + Keys) - 15 min - OPCIONAL
-./apply_phase.sh 5
+cd mig_oci/data_upload
+./upload_scripts.sh    # Envia 21 scripts + utils.zip para o bucket landing-zone
 ```
 
-### 4. Upload de Dados
-
-```bash
-cd ../../data_upload
-./upload_landing.sh
-```
+---
 
 ## Estrutura do Projeto
 
 ```
 mig_oci/
 ├── terraform/
-│   ├── modules/               # Módulos reutilizáveis (iam, network, storage, compute, security)
-│   ├── environments/prod/     # Configuração produção
-│   └── scripts/               # Scripts auxiliares (init, apply_phase, migrate_state)
-├── airflow/                   # Orquestração (configurar após Terraform)
-├── data_upload/               # Scripts de upload (OCI CLI)
-└── docs/                      # Documentação adicional
+│   ├── modules/
+│   │   ├── iam/        # Compartments, grupos, políticas
+│   │   ├── network/    # VCN, subnets, gateways, security lists
+│   │   ├── storage/    # 6 buckets Object Storage
+│   │   ├── compute/    # 21 Data Flow Applications (for_each dinâmico)
+│   │   └── security/   # Vault + Keys (opcional)
+│   ├── environments/prod/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── terraform.tfvars.example
+│   └── scripts/
+│       ├── init.sh              # Inicializar + validar credenciais
+│       └── apply_phase.sh       # Aplicar fase específica (1-5)
+├── data_upload/
+│   ├── scripts/                 # 21 scripts PySpark adaptados para OCI Data Flow
+│   │   ├── bronze_*.py          # 6 scripts Bronze (Landing → Bronze)
+│   │   ├── silver_*.py          # 6 scripts Silver (Bronze → Silver)
+│   │   ├── gold_*.py            # 3 scripts Gold (Silver → Gold features)
+│   │   ├── abt_*.py             # 6 scripts ABT (Gold → ABT v1-v6)
+│   │   └── opc_standby/         # Versões alternativas / benchmarks
+│   └── upload_scripts.sh        # Upload scripts para Object Storage
+├── airflow/                     # Orquestração (configurar após Terraform)
+└── docs/
+    ├── FASE_0_1_IMPLEMENTACAO.md       # Setup, IAM, conceitos OCI
+    ├── FASE_2_3_IMPLEMENTACAO.md       # Network, Storage, lições aprendidas
+    ├── FASE_4_IMPLEMENTACAO.md         # Compute, Data Flow, upload scripts
+    ├── FASE_6A_LANDING_BRONZE.md       # Pipeline Landing → Bronze (as-built)
+    ├── FASE_6A_TROUBLESHOOTING.md      # Lições aprendidas (problemas/soluções)
+    └── IAM_USUARIOS_EQUIPE.md          # Grupos, acessos e integrantes da equipe
 ```
+
+---
+
+## Pipeline de Dados (21 Data Flow Applications)
+
+```
+Landing Zone (OCI Object Storage)
+    │
+    ├── bronze_bureau.py    ─┐
+    ├── bronze_telco.py      │
+    ├── bronze_cadastro.py   ├─ Bronze Layer (6 apps) ✅ Testado
+    ├── bronze_recarga.py    │
+    ├── bronze_pagamento.py  │
+    └── bronze_atraso.py    ─┘
+           │
+    ├── silver_bureau.py    ─┐
+    ├── silver_telco.py      │
+    ├── silver_cadastro.py   ├─ Silver Layer (6 apps) ⏳ silver_recarga testado
+    ├── silver_recarga.py    │
+    ├── silver_pagamento.py  │
+    └── silver_atraso.py    ─┘
+           │
+    ├── gold_recarga.py     ─┐
+    ├── gold_pagamento.py    ├─ Gold Features (3 apps) ⏳ Aguardando
+    └── gold_atraso.py      ─┘
+           │
+    ├── abt_v1_builder.py   ─┐
+    ├── abt_v2_builder.py    │
+    ├── abt_v3_builder.py    ├─ ABT Builders (6 apps) ⏳ Aguardando
+    ├── abt_v4_builder.py    │
+    ├── abt_v5_builder.py    │
+    └── abt_v6_builder.py   ─┘
+```
+
+**Padrão dos scripts (self-contained):**
+- Sem `addPyFile` / sem `archive_uri` — funções utilitárias inline em cada script
+- Namespace OCI recebido via `sys.argv[1]` (passado pelo Terraform via `arguments`)
+- Paths: `oci://hackathon-2025-{layer}-layer@{namespace}/{fonte}/`
+- `SparkSession.builder.appName("...").getOrCreate()` direto (sem configurar `fs.oci.*`)
+
+---
+
+## IAM — Equipe e Acessos
+
+**Grupos criados (Fase 1):**
+
+| Grupo | Acesso Principal |
+|-------|-----------------|
+| `hackathon-2025-administrators` | Acesso total ao projeto |
+| `hackathon-2025-data-engineers` | Object Storage (manage) + Data Flow (manage) |
+| `hackathon-2025-data-scientists` | Data Science Notebooks + leitura buckets |
+| `hackathon-2025-developers` | Sandbox dev-teste (manage) + leitura produção |
+
+> Detalhes completos, integrantes e matriz de acessos: `docs/IAM_USUARIOS_EQUIPE.md`
+
+---
 
 ## Divisão de Responsabilidades
 
 | Ferramenta | O que faz | Quando |
 |------------|-----------|--------|
 | **Terraform** | Cria infraestrutura OCI (compartments, VCN, buckets, Data Flow apps) | Fases 0-5 |
-| **Scripts manuais** | Upload de dados e scripts Python | Fase 6 |
-| **Airflow** | Orquestra EXECUÇÃO dos Data Flow jobs | Após Terraform |
-| **Console OCI** | Testes manuais, monitoramento | Durante toda migração |
+| **upload_scripts.sh** | Envia scripts Python para o bucket landing-zone | Antes de cada deploy |
+| **OCI Data Flow** | Executa jobs Spark gerenciados (Bronze/Silver/Gold/ABT) | Fase 6 |
+| **Airflow** | Orquestra execução dos Data Flow jobs em sequência | Após Terraform |
+| **Console OCI** | Testes manuais, monitoramento de runs, gestão de usuários | Durante toda migração |
 
-## Custos Estimados
+---
 
-- **Desenvolvimento (30 dias):** ~$1,249
-- **Produção (mensal):** ~$350
+## Lições Aprendidas (principais)
 
-## Próximos Passos
+| Problema | Solução |
+|----------|---------|
+| `FILE_URL_INVALID` no Terraform | Scripts devem existir no bucket **antes** do `terraform apply` |
+| `archive_uri` com ZIP simples falha | Exige `conda pack` — usar scripts self-contained no lugar |
+| `addPyFile("oci://...")` não funciona | Race condition com Resource Principal — funções inline |
+| `spark.hadoop.fs.oci.*` é propriedade reservada | Data Flow configura internamente — não incluir no Terraform |
+| `KryoSerializer` quebra autenticação OCI | Incompatível com `X509FederationClient` — não usar no Data Flow |
+| `logs_bucket_uri` obrigatório | Sem ele, Data Flow procura bucket `dataflow-logs` inexistente |
+| Erro X509 pode indicar dados ausentes | Verificar se os dados existem no bucket antes de debugar auth |
 
-1. ✅ Configurar credenciais OCI em `terraform.tfvars`
-2. ✅ Executar `./scripts/init.sh`
-3. ⏳ Executar Fase 1: `./scripts/apply_phase.sh 1`
-4. ⏳ Executar Fases 2-4 incrementalmente
-5. ⏳ Upload de dados (Fase 6)
-6. ⏳ Configurar Airflow
-7. ⏳ Testar pipeline completo
+> Documentação detalhada: `docs/FASE_6A_TROUBLESHOOTING.md`
+
+---
+
+## Custos Estimados (30 dias desenvolvimento)
+
+| Serviço | Custo |
+|---------|-------|
+| Storage (295 GB) | $29 |
+| Data Flow (3 runs completos) | $715 |
+| Data Science Notebooks | $34 |
+| Network | $54 |
+| Airflow (self-hosted VM) | $183 |
+| **Total desenvolvimento** | **~$1,015** |
+| **Operacional mensal (pós-hackathon)** | **~$350** |
+
+---
+
+## Documentação
+
+| Documento | Conteúdo |
+|-----------|----------|
+| `docs/FASE_0_1_IMPLEMENTACAO.md` | Setup, IAM, conceitos OCI (compartments, groups, policies) |
+| `docs/FASE_2_3_IMPLEMENTACAO.md` | Network (VCN, subnets), Storage (buckets), lições aprendidas |
+| `docs/FASE_4_IMPLEMENTACAO.md` | Compute (Data Flow applications), upload de scripts |
+| `docs/FASE_6A_LANDING_BRONZE.md` | Pipeline Landing → Bronze — as-built, funcionando |
+| `docs/FASE_6A_TROUBLESHOOTING.md` | Problemas encontrados e soluções definitivas |
+| `docs/IAM_USUARIOS_EQUIPE.md` | Grupos, acessos, integrantes e matriz de permissões |
+| `data_upload/scripts/opc_standby/COMPARATIVO_VERSOES_SILVER_RECARGA.md` | Benchmark das versões do silver_recarga (vencedor: opt_z, 9m44s) |
+
+---
+
+## Troubleshooting Rápido
+
+### Erro: `FILE_URL_INVALID` no Terraform
+```bash
+cd mig_oci/data_upload
+./upload_scripts.sh   # Fazer upload dos scripts ANTES do terraform apply
+```
+
+### Erro: Quota insuficiente (E4/E3 = 0 no free tier)
+> No Console OCI: Data Flow → Application → Run → Enable Autoscaling
+
+### Erro: Permissão negada no Data Flow
+> Verificar se a policy `dataflow-service-policy` foi aplicada (Fase 1)
+
+### Warning de permissões da chave `.pem` no WSL
+> Inofensivo no WSL/NTFS. `oci setup repair-file-permissions` não funciona em `/mnt/d` — ignorar.
+
+---
 
 ## Referências
 
-- **Plano completo:** `.claude/plans/eager-popping-meerkat.md`
-- **Documentação OCI:** `docs/architecture/OCI_ARCHITECTURE.md`
-- **Terraform + Airflow:** `docs/architecture/OCI_TERRAFORM_AIRFLOW.md`
-- **Guia do Time:** `docs/architecture/GUIA_ARQUITETURA_OCI.md`
-
-## Troubleshooting
-
-### Erro: "terraform.tfvars not found"
-```bash
-cd terraform/environments/prod
-cp terraform.tfvars.example terraform.tfvars
-# Edite terraform.tfvars com seus valores OCI
-```
-
-### Erro: "Private key not found"
-1. Gere API Key no Console OCI: Identity > Users > seu usuário > API Keys > Add API Key
-2. Baixe a chave privada (.pem)
-3. Salve em `~/.oci/oci_api_key.pem`
-4. Defina permissões: `chmod 600 ~/.oci/oci_api_key.pem`
-
-### Erro: Quota insuficiente
-Verifique quotas OCI antes de aplicar:
-- Console OCI > Governance > Limits, Quotas and Usage
-- Especialmente: Compute OCPUs, Object Storage
-
-## Suporte
-
-Para dúvidas sobre o projeto, consulte:
-- **CLAUDE.md:** `.claude/CLAUDE.md` (quick reference)
-- **Docs técnicos:** `docs/08_team_preparation/technical/`
-- **Docs business:** `docs/08_team_preparation/business/`
+- **CLAUDE.md:** `.claude/CLAUDE.md` (quick reference geral do projeto)
+- **Guia OCI para o time:** `docs/architecture/GUIA_ARQUITETURA_OCI.md`
+- **Arquitetura completa:** `docs/architecture/OCI_ARCHITECTURE.md`
