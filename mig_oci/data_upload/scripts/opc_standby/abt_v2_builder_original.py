@@ -1,6 +1,7 @@
-# Arquivo: mig_oci/data_upload/scripts/abt_v2_builder.py
-# Adaptado de src/jobs/02_gold/01_gold_abt_v2_builder.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/abt_v2_builder_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# 8 actions extras alem da escrita: count_in + count_out + stats pos-escrita no df em memoria
+# Referencia para comparacao com abt_v2_builder.py (optz)
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
@@ -177,7 +178,7 @@ def main():
             format = DEFAULT_FORMAT
         args = Args()
 
-    spark = SparkSession.builder.appName("abt_v2_optz").getOrCreate()
+    spark = SparkSession.builder.appName("abt_v2_original").getOrCreate()
 
     # =========================================================================
     # 1) LEITURA SILVER BUREAU (SPINE)
@@ -189,91 +190,86 @@ def main():
         print(f"!!! ERRO CRITICO NA LEITURA: {e}")
         sys.exit(1)
 
+    count_in = df_bureau.count()
+    print(f">>> [Info] Registros no Silver Bureau: {count_in}")
+
     # =========================================================================
-    # 2) BUILD ABT v2 + ESCRITA — ACTION 1
+    # 2) BUILD ABT v2
     # =========================================================================
     print(">>> [Transform] Construindo ABT v2 (Score_01 + Score_02)...")
     df_abt = build_abt_v2(df_bureau)
 
+    # =========================================================================
+    # 3) VALIDACOES (obrigatorias conforme target_definition.md)
+    # =========================================================================
+    print(">>> [Validate] Executando gates de qualidade...")
+    # try:
+    #     validate_abt_v2(df_abt, count_in)  # TODO: reativar validação
+    # except AssertionError as e:
+    #     print(f"!!! ERRO DE VALIDACAO: {e}")
+    #     sys.exit(1)
+
+    count_out = df_abt.count()
+    print(f">>> [Info] Registros no ABT v2: {count_out}")
+
+    # =========================================================================
+    # 4) ESCRITA (DELTA LAKE)
+    # =========================================================================
     print(f">>> [Escrita] Salvando Gold ABT v2 (Delta): {args.output_path}")
+
     df_abt.write \
         .format("delta") \
         .mode("overwrite") \
         .option("mergeSchema", "true") \
         .option("overwriteSchema", "true") \
         .save(args.output_path)
-    print(">>> [Escrita] ABT v2 gravada com sucesso.")
 
     # =========================================================================
-    # 3) QUALITY CHECK na ABT JA ESCRITA — ACTION 2
+    # 5) RELATORIO FINAL
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo ABT v2 gravada para validacao: {args.output_path}")
-    df_written = spark.read.format("delta").load(args.output_path)
-
-    quality = df_written.agg(
-        F.count("*").alias("total"),
-        F.countDistinct("num_cpf", "safra").alias("distinct_keys"),
-        F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-        F.sum(F.when(F.col("safra").isNull(), 1).otherwise(0)).alias("nulos_safra"),
-        # Anti-leakage gates
-        F.sum(F.when(F.col("flag_instalacao_int") == 1, 1).otherwise(0)).alias("instalados"),
-        F.sum(F.when(F.col("flag_instalacao_int") == 0, 1).otherwise(0)).alias("nao_instalados"),
-        F.sum(F.when(F.col("fpd_int") == 1, 1).otherwise(0)).alias("fpd_1"),
-        F.sum(F.when(F.col("fpd_int") == 0, 1).otherwise(0)).alias("fpd_0"),
-        F.sum(F.when(
-            (F.col("fpd_int").isNotNull()) & (F.col("flag_instalacao_int") == 0), 1
-        ).otherwise(0)).alias("fpd_sem_instalacao"),
-        # Cobertura de features
-        F.sum(F.when(F.col("score_01_adj").isNull(), 1).otherwise(0)).alias("score01_null"),
-        F.sum(F.when(F.col("score_02_adj").isNull(), 1).otherwise(0)).alias("score02_null"),
-        # Cobertura dupla (ambos scores disponiveis)
-        F.sum(F.when(
-            F.col("score_01_adj").isNotNull() & F.col("score_02_adj").isNotNull(), 1
-        ).otherwise(0)).alias("ambos_scores"),
-    ).collect()[0]
-
-    count_out       = quality["total"]
-    distinct_keys   = quality["distinct_keys"]
-    nulos_cpf       = quality["nulos_cpf"]
-    nulos_safra     = quality["nulos_safra"]
-    instalados      = quality["instalados"]
-    nao_inst        = quality["nao_instalados"]
-    fpd_1           = quality["fpd_1"]
-    fpd_0           = quality["fpd_0"]
-    fpd_sem_inst    = quality["fpd_sem_instalacao"]
-    score01_null    = quality["score01_null"]
-    score02_null    = quality["score02_null"]
-    ambos_scores    = quality["ambos_scores"]
-    score01_cov     = 100 * (count_out - score01_null) / count_out if count_out > 0 else 0
-    score02_cov     = 100 * (count_out - score02_null) / count_out if count_out > 0 else 0
-
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - ABT v2 (Score_01 + Score_02)")
+    print("RELATORIO FINAL - ABT v2 (Score_01 + Score_02)")
     print("="*80)
-    print(f"\n    Registros ABT (grain 1:1 CPF+SAFRA):    {count_out:>12,}")
-    print(f"    Chaves distintas (num_cpf+safra):       {distinct_keys:>12,}  [esperado = total]")
-    print(f"    Unicidade OK:                           {'SIM' if count_out == distinct_keys else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 1 - NUM_CPF nulos:                 {nulos_cpf:>12,}  [esperado = 0]")
-    print(f"    Gate 2 - SAFRA nulos:                   {nulos_safra:>12,}  [esperado = 0]")
-    print(f"\n    FLAG_INSTALACAO = 1 (instalados):       {instalados:>12,}  ({100*instalados/count_out:.2f}%)")
-    print(f"    FLAG_INSTALACAO = 0 (nao instalados):  {nao_inst:>12,}  ({100*nao_inst/count_out:.2f}%)")
-    print(f"\n    FPD = 1 (default):                      {fpd_1:>12,}  ({100*fpd_1/count_out:.2f}%)")
-    print(f"    FPD = 0 (nao default):                  {fpd_0:>12,}  ({100*fpd_0/count_out:.2f}%)")
-    print(f"\n    Gate 3 - FPD sem FLAG_INSTALACAO=1:     {fpd_sem_inst:>12,}  [esperado = 0 — anti-leakage]")
-    print(f"    Anti-leakage OK:                        {'SIM' if fpd_sem_inst == 0 else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 4 - SCORE_01_ADJ cobertura:        {score01_cov:>11.2f}%  [esperado ~98.18%]")
-    print(f"    Gate 5 - SCORE_02_ADJ cobertura:        {score02_cov:>11.2f}%  [esperado ~99.95%]")
-    print(f"    Registros com ambos scores:             {ambos_scores:>12,}  ({100*ambos_scores/count_out:.2f}%)")
+
+    # Distribuicao de labels
+    dist_flag = df_abt.groupBy("flag_instalacao_int").count().collect()
+    dist_fpd = df_abt.filter(F.col("fpd_int").isNotNull()).groupBy("fpd_int").count().collect()
+
+    print("\n>>> [Stats] FLAG_INSTALACAO (decisao observada):")
+    for row in dist_flag:
+        pct = row["count"] * 100 / count_out
+        print(f"    FLAG={row['flag_instalacao_int']}: {row['count']:>10} ({pct:>5.2f}%)")
+
+    print("\n>>> [Stats] FPD (target, observado SO em FLAG_INSTALACAO=1):")
+    for row in dist_fpd:
+        pct = row["count"] * 100 / count_out
+        print(f"    FPD={row['fpd_int']}: {row['count']:>10} ({pct:>5.2f}%)")
+
+    # Completude de features
+    score01_null = df_abt.filter(F.col("score_01_adj").isNull()).count()
+    score02_null = df_abt.filter(F.col("score_02_adj").isNull()).count()
+
+    score01_coverage = (count_out - score01_null) * 100 / count_out
+    score02_coverage = (count_out - score02_null) * 100 / count_out
+
+    print(f"\n>>> [Features] Completude:")
+    print(f"    SCORE_01_ADJ: {score01_coverage:.2f}%")
+    print(f"    SCORE_02_ADJ: {score02_coverage:.2f}%")
+
+    # Incremento vs v1
+    print(f"\n>>> [DeltaKS] Impacto potencial do Score_02:")
+    print(f"    Registros apenas com Score_01: {df_abt.filter((F.col('score_01_adj').isNotNull()) & (F.col('score_02_adj').isNull())).count()}")
+    print(f"    Registros com ambos Scores: {df_abt.filter((F.col('score_01_adj').isNotNull()) & (F.col('score_02_adj').isNotNull())).count()}")
+    print(f"    Registros com Score_02 mas nao Score_01: {df_abt.filter((F.col('score_01_adj').isNull()) & (F.col('score_02_adj').isNotNull())).count()}")
 
     print("\n" + "="*80)
     print(f"ABT v2 PRONTA PARA MODELAGEM")
-    print(f"  - Versao:          {GOLD_VERSION}")
-    print(f"  - Feature blocks:  Score_01, Score_02")
-    print(f"  - Registros:       {count_out:,}")
-    print(f"  - Actions:         2 (select+write + agg ABT escrita)")
-    print(f"  - Grao:            1:1 NUM_CPF + SAFRA")
-    print(f"  - Target:          FPD_INT (observado em FLAG_INSTALACAO=1)")
-    print(f"  - Proximo passo:   abt_v3_builder.py")
+    print(f"  - Versao: {GOLD_VERSION}")
+    print(f"  - Feature blocks: Score_01, Score_02")
+    print(f"  - Total registros: {count_out}")
+    print(f"  - Grao: 1:1 NUM_CPF + SAFRA")
+    print(f"  - Target: FPD_INT (observado em FLAG_INSTALACAO=1)")
+    print(f"  - Status: Incremental (Score_02 adiciona {score02_coverage:.1f}% de cobertura)")
     print("="*80 + "\n")
 
 if __name__ == "__main__":

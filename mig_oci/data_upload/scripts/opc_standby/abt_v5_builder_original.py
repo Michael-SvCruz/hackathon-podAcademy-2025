@@ -1,6 +1,7 @@
-# Arquivo: mig_oci/data_upload/scripts/abt_v5_builder.py
-# Adaptado de src/jobs/02_gold/04_gold_abt_v5_builder_v2.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/abt_v5_builder_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# Muitas actions: count_v4 + count_recarga + count_v5 (loop janelas) + gerar_relatorio_final (multiplos counts/aggs)
+# Referencia para comparacao com abt_v5_builder.py (optz)
 """
 ================================================================================
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
@@ -81,11 +82,11 @@ namespace = sys.argv[1] if len(sys.argv) > 1 else "default_namespace"
 # =============================================================================
 # CONFIGURACAO PADRAO
 # =============================================================================
-DEFAULT_GOLD_ABT_V4_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v4/"
-DEFAULT_GOLD_RECARGA_FEATURES_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/gold_recarga_features/"
-DEFAULT_OUTPUT_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v5/"
+DEFAULT_GOLD_ABT_V4_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v4_v2/"
+DEFAULT_GOLD_RECARGA_FEATURES_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/recarga_features_v2/"
+DEFAULT_OUTPUT_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v5_v2/"
 DEFAULT_FORMAT = "delta"
-GOLD_VERSION = "gold_abt_v5"
+GOLD_VERSION = "gold_abt_v5_v2"
 
 # Janelas temporais (meses de lookback)
 TEMPORAL_WINDOWS = {
@@ -727,134 +728,104 @@ Exemplos de uso:
     print("\n")
 
     # Inicializar Spark
-    spark = SparkSession.builder.appName("abt_v5_optz").getOrCreate()
+    spark = SparkSession.builder.appName("abt_v5_original").getOrCreate()
 
     # =========================================================================
     # 1) LEITURA ABT V4 (SPINE)
     # =========================================================================
     print(f">>> [Leitura] Carregando ABT v4 (spine): {args.gold_v4_path}")
+
     try:
         df_abt_v4 = spark.read.format(args.format).load(args.gold_v4_path)
     except Exception as e:
         print(f"!!! ERRO CRITICO NA LEITURA ABT V4: {e}")
         sys.exit(1)
 
+    count_v4 = df_abt_v4.count()
+    print(f">>> [Info] Registros no ABT v4: {count_v4:,}")
+    print(f">>> [Info] Colunas no ABT v4: {len(df_abt_v4.columns)}")
+
     # =========================================================================
     # 2) LEITURA GOLD RECARGA FEATURES V2
     # =========================================================================
-    print(f">>> [Leitura] Carregando Gold Recarga Features v2: {args.recarga_features_path}")
+    print(f"\n>>> [Leitura] Carregando Gold Recarga Features v2: {args.recarga_features_path}")
+
     try:
         df_recarga_features = spark.read.format(args.format).load(args.recarga_features_path)
     except Exception as e:
         print(f"!!! ERRO CRITICO NA LEITURA RECARGA FEATURES: {e}")
         sys.exit(1)
 
+    count_recarga = df_recarga_features.count()
+    print(f">>> [Info] Registros no Recarga Features: {count_recarga:,}")
+    print(f">>> [Info] Colunas no Recarga Features: {len(df_recarga_features.columns)}")
+
     # =========================================================================
-    # 3) BUILD ABT V5 + ESCRITA — ACTION 1
+    # 3) BUILD ABT V5
     # =========================================================================
     df_abt_v5 = build_abt_v5(df_abt_v4, df_recarga_features)
 
+    count_v5 = df_abt_v5.count()
+    print(f"\n>>> [Info] Registros no ABT v5: {count_v5:,}")
+    print(f">>> [Info] Colunas no ABT v5: {len(df_abt_v5.columns)}")
+
+    # =========================================================================
+    # 4) VALIDACAO
+    # =========================================================================
+    if not args.skip_validate:
+        # validation_passed = validate_abt_v5_enhanced(df_abt_v5, count_v4)  # TODO: reativar validação
+        # if not validation_passed:
+        #     print("\n!!! ERRO: Validacao falhou. Abortando salvamento.")
+        #     if not args.skip_save:
+        #         sys.exit(1)
+        print("\n>>> [Validate] Validacao desativada (TODO: reativar validate_abt_v5_enhanced)")
+    else:
+        print("\n>>> [Skip] Validacao pulada (--skip_validate)")
+
+    # =========================================================================
+    # 5) RELATORIO FINAL
+    # =========================================================================
+    gerar_relatorio_final(df_abt_v5, count_v4)
+
+    # =========================================================================
+    # 6) ESCRITA
+    # =========================================================================
     if not args.skip_save:
-        print(f">>> [Escrita] Salvando ABT v5 (Delta): {args.output_path}")
+        print(f"\n>>> [Escrita] Salvando ABT v5 (Delta): {args.output_path}")
+
         df_abt_v5.write \
             .format("delta") \
             .mode("overwrite") \
             .option("mergeSchema", "true") \
             .option("overwriteSchema", "true") \
             .save(args.output_path)
-        print(">>> [Escrita] ABT v5 gravada com sucesso.")
+
+        print(f">>> [Sucesso] Dados salvos em: {args.output_path}")
     else:
-        print(">>> [Skip] Salvamento pulado (--skip_save)")
-        return df_abt_v5
+        print("\n>>> [Skip] Salvamento pulado (--skip_save)")
 
     # =========================================================================
-    # 4) QUALITY CHECK na ABT JA ESCRITA — ACTION 2
+    # 7) RESUMO FINAL
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo ABT v5 gravada para validacao: {args.output_path}")
-    df_written = spark.read.format("delta").load(args.output_path)
-
-    quality = df_written.agg(
-        F.count("*").alias("total"),
-        F.countDistinct("num_cpf", "safra").alias("distinct_keys"),
-        F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-        F.sum(F.when(F.col("safra").isNull(), 1).otherwise(0)).alias("nulos_safra"),
-        # Anti-leakage gates
-        F.sum(F.when(F.col("flag_instalacao_int") == 1, 1).otherwise(0)).alias("instalados"),
-        F.sum(F.when(F.col("flag_instalacao_int") == 0, 1).otherwise(0)).alias("nao_instalados"),
-        F.sum(F.when(F.col("fpd_int") == 1, 1).otherwise(0)).alias("fpd_1"),
-        F.sum(F.when(F.col("fpd_int") == 0, 1).otherwise(0)).alias("fpd_0"),
-        F.sum(F.when(
-            (F.col("fpd_int").isNotNull()) & (F.col("flag_instalacao_int") == 0), 1
-        ).otherwise(0)).alias("fpd_sem_instalacao"),
-        # Cobertura scores
-        F.sum(F.when(F.col("score_01_adj").isNull(), 1).otherwise(0)).alias("score01_null"),
-        F.sum(F.when(F.col("score_02_adj").isNull(), 1).otherwise(0)).alias("score02_null"),
-        # Cobertura Telco
-        F.sum(F.when(F.col("var_26_adj").isNotNull(), 1).otherwise(0)).alias("telco_match"),
-        # Cobertura Recarga por janela (M1/M3/M6)
-        F.sum(F.when(F.col("qtd_recargas_m1") > 0, 1).otherwise(0)).alias("recarga_m1"),
-        F.sum(F.when(F.col("qtd_recargas_m3") > 0, 1).otherwise(0)).alias("recarga_m3"),
-        F.sum(F.when(F.col("qtd_recargas_m6") > 0, 1).otherwise(0)).alias("recarga_m6"),
-        # SOS presenca M1
-        F.sum(F.when(F.col("qtd_sos_m1") > 0, 1).otherwise(0)).alias("com_sos_m1"),
-    ).collect()[0]
-
-    count_out       = quality["total"]
-    distinct_keys   = quality["distinct_keys"]
-    nulos_cpf       = quality["nulos_cpf"]
-    nulos_safra     = quality["nulos_safra"]
-    instalados      = quality["instalados"]
-    nao_inst        = quality["nao_instalados"]
-    fpd_1           = quality["fpd_1"]
-    fpd_0           = quality["fpd_0"]
-    fpd_sem_inst    = quality["fpd_sem_instalacao"]
-    score01_null    = quality["score01_null"]
-    score02_null    = quality["score02_null"]
-    telco_match     = quality["telco_match"]
-    recarga_m1      = quality["recarga_m1"]
-    recarga_m3      = quality["recarga_m3"]
-    recarga_m6      = quality["recarga_m6"]
-    com_sos_m1      = quality["com_sos_m1"]
-
-    score01_cov     = 100 * (count_out - score01_null) / count_out if count_out > 0 else 0
-    score02_cov     = 100 * (count_out - score02_null) / count_out if count_out > 0 else 0
-    telco_pct       = 100 * telco_match / count_out if count_out > 0 else 0
-    rec_m1_pct      = 100 * recarga_m1 / count_out if count_out > 0 else 0
-    rec_m3_pct      = 100 * recarga_m3 / count_out if count_out > 0 else 0
-    rec_m6_pct      = 100 * recarga_m6 / count_out if count_out > 0 else 0
-    sos_m1_pct      = 100 * com_sos_m1 / count_out if count_out > 0 else 0
-
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - ABT v5 (v4 + Recarga M1/M3/M6)")
+    print("ABT V5 CONSTRUIDO COM SUCESSO!")
     print("="*80)
-    print(f"\n    Registros ABT (grain 1:1 CPF+SAFRA):    {count_out:>12,}")
-    print(f"    Chaves distintas (num_cpf+safra):       {distinct_keys:>12,}  [esperado = total]")
-    print(f"    Unicidade OK:                           {'SIM' if count_out == distinct_keys else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 1 - NUM_CPF nulos:                 {nulos_cpf:>12,}  [esperado = 0]")
-    print(f"    Gate 2 - SAFRA nulos:                   {nulos_safra:>12,}  [esperado = 0]")
-    print(f"\n    FLAG_INSTALACAO = 1 (instalados):       {instalados:>12,}  ({100*instalados/count_out:.2f}%)")
-    print(f"    FLAG_INSTALACAO = 0 (nao instalados):  {nao_inst:>12,}  ({100*nao_inst/count_out:.2f}%)")
-    print(f"\n    FPD = 1 (default):                      {fpd_1:>12,}  ({100*fpd_1/count_out:.2f}%)")
-    print(f"    FPD = 0 (nao default):                  {fpd_0:>12,}  ({100*fpd_0/count_out:.2f}%)")
-    print(f"\n    Gate 3 - FPD sem FLAG_INSTALACAO=1:     {fpd_sem_inst:>12,}  [esperado = 0 — anti-leakage]")
-    print(f"    Anti-leakage OK:                        {'SIM' if fpd_sem_inst == 0 else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 4 - SCORE_01_ADJ cobertura:        {score01_cov:>11.2f}%  [esperado ~98.18%]")
-    print(f"    Gate 5 - SCORE_02_ADJ cobertura:        {score02_cov:>11.2f}%  [esperado ~99.95%]")
-    print(f"    Gate 6 - Telco match:                   {telco_match:>12,}  ({telco_pct:.2f}%)  [esperado ~35.46%]")
-    print(f"\n    Gate 7 - Recarga M1 cobertura:          {recarga_m1:>12,}  ({rec_m1_pct:.2f}%)  [esperado ~56.12%]")
-    print(f"    Gate 8 - Recarga M3 cobertura:          {recarga_m3:>12,}  ({rec_m3_pct:.2f}%)")
-    print(f"    Gate 9 - Recarga M6 cobertura:          {recarga_m6:>12,}  ({rec_m6_pct:.2f}%)")
-    print(f"    Gate 10 - SOS presenca M1:              {com_sos_m1:>12,}  ({sos_m1_pct:.2f}%)  [distribuicao sensata?]")
+    print(f"""
+    Resumo:
+    +-- ABT v4 (input):           {count_v4:>12,} registros
+    +-- Recarga Features (input): {count_recarga:>12,} registros
+    +-- ABT v5 (output):          {count_v5:>12,} registros
+    +-- Colunas totais:           {len(df_abt_v5.columns):>12}
+    +-- Output:                   {args.output_path}
 
-    print("\n" + "="*80)
-    print(f"ABT v5 PRONTA PARA MODELAGEM")
-    print(f"  - Versao:          {GOLD_VERSION}")
-    print(f"  - Feature blocks:  Score_01, Score_02, Telco, Cadastro, Recarga M1/M3/M6")
-    print(f"  - Registros:       {count_out:,}")
-    print(f"  - Actions:         2 (join+write + agg ABT escrita)")
-    print(f"  - Grao:            1:1 NUM_CPF + SAFRA")
-    print(f"  - Target:          FPD_INT (observado em FLAG_INSTALACAO=1)")
-    print(f"  - Proximo passo:   abt_v6_builder.py")
+    Features adicionadas:
+    +-- Recarga M1: ~30 features (ultimo mes)
+    +-- Recarga M3: ~30 features (ultimos 3 meses)
+    +-- Recarga M6: ~30 features (ultimos 6 meses)
+
+    Proximo passo:
+    -> ABT v6: v5 + Pagamento + Atraso
+    """)
     print("="*80 + "\n")
 
     return df_abt_v5

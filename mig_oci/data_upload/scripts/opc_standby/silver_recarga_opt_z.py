@@ -1,17 +1,21 @@
-# Arquivo: scripts/silver_recarga.py
-# PRINCIPAL — sem cache, quality na Silver JA ESCRITA + Coalesce DINAMICO
-# Promovido de opt_z em 20/02/2026 (benchmark: 9m44s, 3GB lidos, 3 executors).
+# Arquivo: scripts/opc_standby/silver_recarga_opt_z.py
+# OPCAO Z: sem cache, quality na Silver JA ESCRITA + Coalesce DINAMICO
+# Variante de opt_y com coalesce dinamico em vez de fixo (28).
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
-SCRIPT: silver_recarga.py — PRINCIPAL (opt_z promovido em 20/02/2026)
+SCRIPT: silver_recarga_opt_z.py — OPCAO Z (sem cache + coalesce dinamico)
 OBJETIVO: Bronze -> Silver sem cache, quality sobre arquivo escrito,
           com numero de arquivos de saida calculado dinamicamente.
 --------------------------------------------------------------------------------
-ARQUITETURA (sem cache + coalesce dinamico):
-  action 1: count() pre-write   → calcula num_output_files + le Bronze 1x
-  action 2: coalesce(N).write() → le Bronze 1x (sem cache: 2a leitura)
-  action 3: agg(Silver escrita) → le Silver ~3GB do OCI para quality
+DIFERENCA VS OPT-Y (silver_recarga.py — principal):
+- Coalesce DINAMICO: calcula num_output_files com base em count() antes do write
+- Adiciona 1 action extra (count pre-write) = 3 actions totais vs 2 do opt_y
+- Adiciona 1 leitura extra do Bronze para o count pre-write
+
+DIFERENCA VS V4-CACHE (silver_recarga_v4_cache.py):
+- SEM cache: sem pressao de memoria
+- Quality valida Silver JA ESCRITA (nao uma copia em memoria)
 
 FLUXO (3 actions, 2 leituras Bronze + 1 leitura Silver):
   Bronze(4GB OCI) → count()          [action 1 — le Bronze 1x para contar]
@@ -20,18 +24,17 @@ FLUXO (3 actions, 2 leituras Bronze + 1 leitura Silver):
 
 COALESCE DINAMICO:
   num_files = max(1, int(count * BYTES_PER_ROW / (1024*1024) / TARGET_MB))
-  (~40 bytes/registro e uma estimativa conservadora para Delta comprimido)
+  (~40 bytes/registro em OCI → estima tamanho do arquivo de saida)
 
-VANTAGENS VS VERSAO ANTERIOR (opt_y — coalesce fixo 28):
+TRADE-OFF VS OPT-Y:
   + Adapta-se automaticamente se o volume crescer (ex: 200M registros)
   + Sem risco de arquivos maiores que o target sem aviso
-  + Performance igual ou superior (9m44s vs 10m32s com 1 executor a mais)
-  + Sem pressao de memoria (sem cache)
-  + Quality valida o arquivo REAL no bucket (nao copia em memoria)
+  - 1 action extra → 1 leitura adicional do Bronze (~4GB)
+  - Se volume for estavél (~100M), fixo em 28 (opt_y) e mais eficiente
 
-HISTORICO DE PERFORMANCE (OCI Data Flow):
-  opt_y (2 executors): 10m 32s | 3GB lidos | 3GB escritos | coalesce fixo
-  opt_z (3 executors): 9m 44s  | 3GB lidos | 3GB escritos | coalesce dinamico <- ATUAL
+QUANDO USAR:
+  Quando o volume de dados for volatil ou crescer significativamente
+  entre execucoes. Para volumes estaveis (~100M registros), prefira opt_y.
 --------------------------------------------------------------------------------
 """
 
@@ -95,7 +98,7 @@ TARGET_FILE_SIZE_MB = 128
 # =============================================================================
 
 def build_silver(df_bronze):
-    """Transform Bronze -> Silver (tipagem + regras de qualidade)."""
+    """Identica ao principal (silver_recarga.py)."""
     print(">>> [Transform] Tipagem + regras Silver (recarga evento-level)...")
 
     df = (
@@ -197,7 +200,7 @@ def build_silver(df_bronze):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ETL Bronze to Silver - PRINCIPAL (sem cache + coalesce dinamico)")
+    parser = argparse.ArgumentParser(description="ETL Bronze to Silver - OPCAO Z (sem cache + coalesce dinamico)")
     parser.add_argument("--input_path", help="Caminho da Bronze (Delta)")
     parser.add_argument("--output_path", help="Caminho de destino na Silver (Delta)")
     parser.add_argument("--format", default=DEFAULT_FORMAT)
@@ -214,7 +217,7 @@ def main():
             format = DEFAULT_FORMAT
         args = Args()
 
-    spark = SparkSession.builder.appName("Silver_Recarga").getOrCreate()
+    spark = SparkSession.builder.appName("Silver_Recarga_OptZ").getOrCreate()
 
     # =========================================================================
     # 1) LEITURA BRONZE
@@ -235,9 +238,9 @@ def main():
 
     # =========================================================================
     # 3) COALESCE DINAMICO — ACTION 1 (le Bronze 1x para contar)
-    # Executa count() pre-write para calcular o numero de arquivos de saida.
-    # Custo: 1 leitura extra do Bronze (~4GB).
-    # Beneficio: auto-adapta ao volume sem reconfigurar o script.
+    # Diferenca chave vs opt_y: executa count() pre-write para calcular
+    # o numero de arquivos de saida dinamicamente.
+    # Custo: 1 leitura extra do Bronze (~4GB). Beneficio: auto-adapta ao volume.
     # =========================================================================
     print(">>> [Coalesce] Contando registros para calcular coalesce dinamico...")
     count_pre = df_silver.count()
@@ -267,14 +270,13 @@ def main():
 
     # =========================================================================
     # 5) QUALITY CHECKS na Silver JA ESCRITA — ACTION 3 (le Silver ~3GB do OCI)
-    # Valida o arquivo REAL no bucket, nao uma copia em memoria.
-    # Detecta falhas silenciosas de escrita que quality-on-cache nao detectaria.
+    # Identico ao opt_y: valida o arquivo REAL no bucket, nao copia em memoria.
     # =========================================================================
     print(f"\n>>> [Quality] Lendo Silver gravada para validacao: {args.output_path}")
     df_silver_written = spark.read.format("delta").load(args.output_path)
 
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER RECARGA")
+    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER RECARGA (OPT-Z)")
     print("="*80)
 
     quality_metrics = df_silver_written.agg(
@@ -324,9 +326,9 @@ def main():
     print(f"    FLAG=1: {flag_1:>12} ({100*flag_1/count_out:.2f}%)")
 
     print("\n" + "="*80)
-    print(f"Silver RECARGA concluido — sem cache, coalesce dinamico, quality na Silver escrita")
+    print(f"Silver RECARGA concluido — OPCAO Z (sem cache, coalesce dinamico, quality na Silver escrita)")
     print(f"  - Registros:          {count_out}")
-    print(f"  - Arquivos de saida:  {num_output_files} (~{TARGET_FILE_SIZE_MB}MB cada, calculado em runtime)")
+    print(f"  - Arquivos de saida:  {num_output_files} (~{TARGET_FILE_SIZE_MB}MB cada)")
     print(f"  - Actions:            3 (count pre-write + write Bronze→Silver + agg Silver escrita)")
     print(f"  - Cache:              nao (sem pressao de memoria)")
     print(f"  - Dedupe:             removida (Gold groupBy absorve 0.3%)")

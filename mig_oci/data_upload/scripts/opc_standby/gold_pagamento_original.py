@@ -1,19 +1,23 @@
-# Arquivo: mig_oci/data_upload/scripts/gold_pagamento.py
-# Adaptado de src/jobs/02_gold/gold_pagamento_features_v2.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/gold_pagamento_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# 3 actions: count_silver + count_gold + write (sem quality check na Gold escrita)
+# Referencia para comparacao com gold_pagamento.py (optz)
 """
 ================================================================================
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
-SCRIPT: gold_pagamento.py (OCI Data Flow)
+SCRIPT: gold_pagamento_original.py — VERSAO ORIGINAL (referencia)
 OBJETIVO: Gerar features comportamentais de Pagamento para ABT v6
 ================================================================================
 
-DESCRICAO TECNICA:
-Este script processa dados de Pagamento da Silver e gera features comportamentais
-agregadas por cliente-mes para modelagem de risco de credito.
-
+DIFERENCA VS gold_pagamento.py (optz):
+  - 3 actions: count_silver + count_gold + write
+  - Sem quality check no arquivo Gold ja escrito
+  - optz remove count_silver e count_gold, adiciona agg() na Gold escrita (2 actions)
 ================================================================================
-ARQUITETURA:
+ARQUITETURA (3 actions):
+  action 1: count(Silver)           -> log de volume de entrada
+  action 2: count(Gold pre-escrita) -> log de compressao
+  action 3: write()                 -> grava Gold
 ================================================================================
 
     SILVER (pagamento_silver_delta)
@@ -34,7 +38,7 @@ ARQUITETURA:
          |
          | Grao: 1 linha por NUM_CPF + SAFRA_PAGAMENTO
          v
-    GOLD (pagamento_features_v2_delta)
+    GOLD (gold_pagamento_features)
 
 ================================================================================
 """
@@ -47,10 +51,6 @@ from pyspark.sql.window import Window
 
 # Namespace OCI (passado como argumento)
 namespace = sys.argv[1] if len(sys.argv) > 1 else "default_namespace"
-
-# No OCI Data Flow, a SparkSession já vem pré-configurada pelo serviço:
-# - Delta Lake (via configuration{} do Terraform)
-# - Autenticação OCI (Resource Principal automático)
 
 # =============================================================================
 # CONFIGURACAO
@@ -321,10 +321,10 @@ def main():
     print("=" * 78)
     print("\n")
 
-    spark = SparkSession.builder.appName("gold_pagamento_optz").getOrCreate()
+    spark = SparkSession.builder.appName("gold_pagamento_original").getOrCreate()
 
     # =========================================================================
-    # 1) LEITURA SILVER
+    # 1) LEITURA SILVER — ACTION 1
     # =========================================================================
     print(f">>> [Leitura] Carregando Silver Pagamento: {args.input_path}")
     try:
@@ -333,11 +333,19 @@ def main():
         print(f"!!! ERRO: {e}")
         sys.exit(1)
 
+    count_silver = df_silver.count()
+    print(f">>> [Info] Registros Silver: {count_silver:,}")
+
     # =========================================================================
-    # 2) PROCESSAMENTO — ACTION 1 (groupBy + write)
+    # 2) PROCESSAMENTO — ACTION 2
     # =========================================================================
     df_gold = criar_features_pagamento(df_silver)
+    count_gold = df_gold.count()
+    print(f">>> [Info] Registros Gold: {count_gold:,}")
 
+    # =========================================================================
+    # 3) ESCRITA — ACTION 3
+    # =========================================================================
     if not args.skip_save:
         print(f"\n>>> [Escrita] Salvando: {args.output_path}")
         df_gold.write \
@@ -346,55 +354,12 @@ def main():
             .partitionBy("safra_pagamento") \
             .option("mergeSchema", "true") \
             .save(args.output_path)
-        print(">>> [Escrita] Gold gravada com sucesso.")
 
-        # =====================================================================
-        # 3) QUALITY CHECK na Gold JA ESCRITA — ACTION 2
-        # =====================================================================
-        print(f"\n>>> [Quality] Lendo Gold gravada para validacao: {args.output_path}")
-        df_written = spark.read.format("delta").load(args.output_path)
-
-        quality = df_written.agg(
-            F.count("*").alias("total"),
-            F.countDistinct("num_cpf", "safra_pagamento").alias("distinct_keys"),
-            F.countDistinct("num_cpf").alias("cpfs_distintos"),
-            F.countDistinct("safra_pagamento").alias("safras_distintas"),
-            F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-            F.sum(F.when(F.col("flag_sem_pagamento_mes") == 1, 1).otherwise(0)).alias("sem_pagamento"),
-            F.sum(F.when(F.col("flag_sempre_com_juros_mes") == 1, 1).otherwise(0)).alias("sempre_com_juros"),
-            F.sum(F.when(F.col("flag_alto_desconto_mes") == 1, 1).otherwise(0)).alias("alto_desconto"),
-        ).collect()[0]
-
-        count_gold    = quality["total"]
-        distinct_keys = quality["distinct_keys"]
-        cpfs          = quality["cpfs_distintos"]
-        safras        = quality["safras_distintas"]
-        nulos_cpf     = quality["nulos_cpf"]
-        sem_pag       = quality["sem_pagamento"]
-        com_juros     = quality["sempre_com_juros"]
-        alto_desc     = quality["alto_desconto"]
-
-        print("\n" + "="*80)
-        print(">>> [Quality] RELATORIO DE QUALIDADE - GOLD PAGAMENTO")
-        print("="*80)
-        print(f"\n    Registros Gold (1 linha/CPF+SAFRA):      {count_gold:>12,}")
-        print(f"    Chaves distintas (num_cpf+safra):        {distinct_keys:>12,}  [esperado = total]")
-        print(f"    Unicidade OK:                            {'SIM' if count_gold == distinct_keys else 'NAO — VERIFICAR'}")
-        print(f"\n    CPFs distintos:                          {cpfs:>12,}")
-        print(f"    Safras distintas:                        {safras:>12,}")
-        print(f"\n    Gate 1 - NUM_CPF nulos:                  {nulos_cpf:>12,}  [esperado = 0]")
-        print(f"\n    Flag sem pagamento no mes:               {sem_pag:>12,}  ({100*sem_pag/count_gold:.2f}%)")
-        print(f"    Flag sempre com juros (>80%):            {com_juros:>12,}  ({100*com_juros/count_gold:.2f}%)")
-        print(f"    Flag alto desconto (>10%):               {alto_desc:>12,}  ({100*alto_desc/count_gold:.2f}%)")
-
-        print("\n" + "="*80)
-        print("Gold PAGAMENTO concluido")
-        print(f"  - Registros:          {count_gold:,}")
-        print(f"  - Compressao:         Silver (N linhas/CPF) → Gold (1 linha/CPF+SAFRA)")
-        print(f"  - Actions:            2 (groupBy+write + agg Gold escrita)")
-        print(f"  - Particionamento:    safra_pagamento")
-        print(f"  - Proximo passo:      abt_v6_builder.py")
-        print("="*80 + "\n")
+    print("\n" + "="*80)
+    print("PAGAMENTO FEATURES V2 CONCLUIDO!")
+    print(f"  Silver: {count_silver:,} -> Gold: {count_gold:,}")
+    print(f"  Compressao: {count_silver/count_gold:.1f}x")
+    print("="*80 + "\n")
 
     return df_gold
 

@@ -1,10 +1,11 @@
-# Arquivo: mig_oci/data_upload/scripts/gold_atraso.py
-# Adaptado de src/jobs/02_gold/gold_atraso_features_v2.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/gold_atraso_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# 3 actions: count_silver + count_gold + write (sem quality check na Gold escrita)
+# Referencia para comparacao com gold_atraso.py (optz)
 """
 ================================================================================
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
-SCRIPT: gold_atraso.py (OCI Data Flow)
+SCRIPT: gold_atraso_original.py — VERSAO ORIGINAL (referencia)
 OBJETIVO: Gerar features comportamentais de Atraso para ABT v6
 ================================================================================
 
@@ -16,7 +17,15 @@ A base de Atraso e um SNAPSHOT MENSAL (sempre dia 01) que mostra o estado das
 faturas em aberto, aging, write-offs, provisoes, etc.
 
 ================================================================================
-ARQUITETURA:
+DIFERENCA VS gold_atraso.py (optz):
+  - 3 actions: count_silver + count_gold + write
+  - Sem quality check no arquivo Gold ja escrito
+  - optz remove count_silver e count_gold, adiciona agg() na Gold escrita (2 actions)
+================================================================================
+ARQUITETURA (3 actions):
+  action 1: count(Silver)           -> log de volume de entrada
+  action 2: count(Gold pre-escrita) -> log de compressao
+  action 3: write()                 -> grava Gold
 ================================================================================
 
     SILVER (atraso_silver_delta)
@@ -50,10 +59,6 @@ from pyspark.sql.window import Window
 
 # Namespace OCI (passado como argumento)
 namespace = sys.argv[1] if len(sys.argv) > 1 else "default_namespace"
-
-# No OCI Data Flow, a SparkSession já vem pré-configurada pelo serviço:
-# - Delta Lake (via configuration{} do Terraform)
-# - Autenticação OCI (Resource Principal automático)
 
 # =============================================================================
 # CONFIGURACAO
@@ -366,10 +371,10 @@ def main():
     print("=" * 78)
     print("\n")
 
-    spark = SparkSession.builder.appName("gold_atraso_optz").getOrCreate()
+    spark = SparkSession.builder.appName("gold_atraso_original").getOrCreate()
 
     # =========================================================================
-    # 1) LEITURA SILVER
+    # 1) LEITURA SILVER — ACTION 1
     # =========================================================================
     print(f">>> [Leitura] Carregando Silver Atraso: {args.input_path}")
     try:
@@ -378,11 +383,19 @@ def main():
         print(f"!!! ERRO: {e}")
         sys.exit(1)
 
+    count_silver = df_silver.count()
+    print(f">>> [Info] Registros Silver: {count_silver:,}")
+
     # =========================================================================
-    # 2) PROCESSAMENTO — ACTION 1 (groupBy + write)
+    # 2) PROCESSAMENTO — ACTION 2
     # =========================================================================
     df_gold = criar_features_atraso(df_silver)
+    count_gold = df_gold.count()
+    print(f">>> [Info] Registros Gold: {count_gold:,}")
 
+    # =========================================================================
+    # 3) ESCRITA — ACTION 3
+    # =========================================================================
     if not args.skip_save:
         print(f"\n>>> [Escrita] Salvando: {args.output_path}")
         df_gold.write \
@@ -391,55 +404,12 @@ def main():
             .partitionBy("safra_atraso") \
             .option("mergeSchema", "true") \
             .save(args.output_path)
-        print(">>> [Escrita] Gold gravada com sucesso.")
 
-        # =====================================================================
-        # 3) QUALITY CHECK na Gold JA ESCRITA — ACTION 2
-        # =====================================================================
-        print(f"\n>>> [Quality] Lendo Gold gravada para validacao: {args.output_path}")
-        df_written = spark.read.format("delta").load(args.output_path)
-
-        quality = df_written.agg(
-            F.count("*").alias("total"),
-            F.countDistinct("num_cpf", "safra_atraso").alias("distinct_keys"),
-            F.countDistinct("num_cpf").alias("cpfs_distintos"),
-            F.countDistinct("safra_atraso").alias("safras_distintas"),
-            F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-            F.sum(F.when(F.col("flag_risco_alto_mes") == 1, 1).otherwise(0)).alias("risco_alto"),
-            F.sum(F.when(F.col("flag_sem_atraso_mes") == 1, 1).otherwise(0)).alias("sem_atraso"),
-            F.sum(F.when(F.col("flag_atraso_grave_mes") == 1, 1).otherwise(0)).alias("atraso_grave"),
-        ).collect()[0]
-
-        count_gold    = quality["total"]
-        distinct_keys = quality["distinct_keys"]
-        cpfs          = quality["cpfs_distintos"]
-        safras        = quality["safras_distintas"]
-        nulos_cpf     = quality["nulos_cpf"]
-        risco_alto    = quality["risco_alto"]
-        sem_atraso    = quality["sem_atraso"]
-        atraso_grave  = quality["atraso_grave"]
-
-        print("\n" + "="*80)
-        print(">>> [Quality] RELATORIO DE QUALIDADE - GOLD ATRASO")
-        print("="*80)
-        print(f"\n    Registros Gold (1 linha/CPF+SAFRA):  {count_gold:>12,}")
-        print(f"    Chaves distintas (num_cpf+safra):    {distinct_keys:>12,}  [esperado = total]")
-        print(f"    Unicidade OK:                        {'SIM' if count_gold == distinct_keys else 'NAO — VERIFICAR'}")
-        print(f"\n    CPFs distintos:                      {cpfs:>12,}")
-        print(f"    Safras distintas:                    {safras:>12,}")
-        print(f"\n    Gate 1 - NUM_CPF nulos:              {nulos_cpf:>12,}  [esperado = 0]")
-        print(f"\n    Flag risco alto (WO/PDD/Fraude):     {risco_alto:>12,}  ({100*risco_alto/count_gold:.2f}%)")
-        print(f"    Flag sem atraso no mes:              {sem_atraso:>12,}  ({100*sem_atraso/count_gold:.2f}%)")
-        print(f"    Flag atraso grave (>50% em 90+):     {atraso_grave:>12,}  ({100*atraso_grave/count_gold:.2f}%)")
-
-        print("\n" + "="*80)
-        print("Gold ATRASO concluido")
-        print(f"  - Registros:          {count_gold:,}")
-        print(f"  - Compressao:         Silver (N linhas/CPF) → Gold (1 linha/CPF+SAFRA)")
-        print(f"  - Actions:            2 (groupBy+write + agg Gold escrita)")
-        print(f"  - Particionamento:    safra_atraso")
-        print(f"  - Proximo passo:      abt_v6_builder.py")
-        print("="*80 + "\n")
+    print("\n" + "="*80)
+    print("ATRASO FEATURES V2 CONCLUIDO!")
+    print(f"  Silver: {count_silver:,} -> Gold: {count_gold:,}")
+    print(f"  Compressao: {count_silver/count_gold:.1f}x")
+    print("="*80 + "\n")
 
     return df_gold
 

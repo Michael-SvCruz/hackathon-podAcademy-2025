@@ -1,6 +1,7 @@
-# Arquivo: mig_oci/data_upload/scripts/abt_v4_builder.py
-# Adaptado de src/jobs/02_gold/03_gold_abt_v4_builder.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/abt_v4_builder_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# ~75 actions: count_in_v3 + count_in_cadastro + count_out + write + loop 24 vars Telco + loop 24 vars Cadastro + cadastro_match_count
+# Referencia para comparacao com abt_v4_builder.py (optz)
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
@@ -227,7 +228,7 @@ def main():
             format = DEFAULT_FORMAT
         args = Args()
 
-    spark = SparkSession.builder.appName("abt_v4_optz").getOrCreate()
+    spark = SparkSession.builder.appName("abt_v4_original").getOrCreate()
 
     # =========================================================================
     # 1) LEITURA GOLD ABT v3 (SPINE)
@@ -239,6 +240,9 @@ def main():
         print(f"!!! ERRO CRITICO NA LEITURA ABT v3: {e}")
         sys.exit(1)
 
+    count_in_v3 = df_abt_v3.count()
+    print(f">>> [Info] Registros no Gold ABT v3: {count_in_v3}")
+
     # =========================================================================
     # 2) LEITURA SILVER CADASTRO (ENRIQUECIMENTO)
     # =========================================================================
@@ -249,104 +253,150 @@ def main():
         print(f"!!! ERRO CRITICO NA LEITURA CADASTRO: {e}")
         sys.exit(1)
 
+    count_in_cadastro = df_cadastro.count()
+    print(f">>> [Info] Registros no Silver Cadastro: {count_in_cadastro}")
+
     # =========================================================================
-    # 3) BUILD ABT v4 + ESCRITA — ACTION 1
+    # 3) BUILD ABT v4 (ABT v3 LEFT JOIN Cadastro)
     # =========================================================================
     print(">>> [Transform] Construindo ABT v4 (Score_01 + Score_02 + Telco + Cadastro)...")
     df_abt = build_abt_v4(df_abt_v3, df_cadastro)
 
+    # =========================================================================
+    # 4) VALIDACOES (obrigatorias conforme target_definition.md)
+    # =========================================================================
+    print(">>> [Validate] Executando gates de qualidade...")
+    # try:
+    #     validate_abt_v4(df_abt)  # TODO: reativar validação
+    # except AssertionError as e:
+    #     print(f"!!! ERRO DE VALIDACAO: {e}")
+    #     sys.exit(1)
+
+    count_out = df_abt.count()
+    print(f">>> [Info] Registros no ABT v4: {count_out}")
+
+    # =========================================================================
+    # 5) ESCRITA (DELTA LAKE)
+    # =========================================================================
     print(f">>> [Escrita] Salvando Gold ABT v4 (Delta): {args.output_path}")
+
     df_abt.write \
         .format("delta") \
         .mode("overwrite") \
         .option("mergeSchema", "true") \
         .option("overwriteSchema", "true") \
         .save(args.output_path)
-    print(">>> [Escrita] ABT v4 gravada com sucesso.")
 
     # =========================================================================
-    # 4) QUALITY CHECK na ABT JA ESCRITA — ACTION 2
+    # 6) RELATORIO FINAL
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo ABT v4 gravada para validacao: {args.output_path}")
-    df_written = spark.read.format("delta").load(args.output_path)
-
-    quality = df_written.agg(
-        F.count("*").alias("total"),
-        F.countDistinct("num_cpf", "safra").alias("distinct_keys"),
-        F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-        F.sum(F.when(F.col("safra").isNull(), 1).otherwise(0)).alias("nulos_safra"),
-        # Anti-leakage gates
-        F.sum(F.when(F.col("flag_instalacao_int") == 1, 1).otherwise(0)).alias("instalados"),
-        F.sum(F.when(F.col("flag_instalacao_int") == 0, 1).otherwise(0)).alias("nao_instalados"),
-        F.sum(F.when(F.col("fpd_int") == 1, 1).otherwise(0)).alias("fpd_1"),
-        F.sum(F.when(F.col("fpd_int") == 0, 1).otherwise(0)).alias("fpd_0"),
-        F.sum(F.when(
-            (F.col("fpd_int").isNotNull()) & (F.col("flag_instalacao_int") == 0), 1
-        ).otherwise(0)).alias("fpd_sem_instalacao"),
-        # Cobertura de features v1 e v2
-        F.sum(F.when(F.col("score_01_adj").isNull(), 1).otherwise(0)).alias("score01_null"),
-        F.sum(F.when(F.col("score_02_adj").isNull(), 1).otherwise(0)).alias("score02_null"),
-        # Cobertura Telco: match via var_26_adj + cobertura agregada 68 vars
-        F.sum(F.when(F.col("var_26_adj").isNotNull(), 1).otherwise(0)).alias("telco_match"),
-        *[F.sum(F.when(F.col(f"var_{i}_adj").isNotNull(), 1).otherwise(0)).alias(f"telco_{i}_nn") for i in range(26, 94)],
-        # Cobertura Cadastro: match via idade_anos + cobertura agregada 24 vars
-        F.sum(F.when(F.col("idade_anos").isNotNull(), 1).otherwise(0)).alias("cadastro_match"),
-        *[F.sum(F.when(F.col(f"var_{i:02d}").isNotNull(), 1).otherwise(0)).alias(f"cad_{i:02d}_nn") for i in range(2, 26)],
-    ).collect()[0]
-
-    count_out       = quality["total"]
-    distinct_keys   = quality["distinct_keys"]
-    nulos_cpf       = quality["nulos_cpf"]
-    nulos_safra     = quality["nulos_safra"]
-    instalados      = quality["instalados"]
-    nao_inst        = quality["nao_instalados"]
-    fpd_1           = quality["fpd_1"]
-    fpd_0           = quality["fpd_0"]
-    fpd_sem_inst    = quality["fpd_sem_instalacao"]
-    score01_null    = quality["score01_null"]
-    score02_null    = quality["score02_null"]
-    telco_match     = quality["telco_match"]
-    telco_nn_total  = sum(quality[f"telco_{i}_nn"] for i in range(26, 94))
-    cadastro_match  = quality["cadastro_match"]
-    cadastro_nn_total = sum(quality[f"cad_{i:02d}_nn"] for i in range(2, 26))
-
-    score01_cov        = 100 * (count_out - score01_null) / count_out if count_out > 0 else 0
-    score02_cov        = 100 * (count_out - score02_null) / count_out if count_out > 0 else 0
-    telco_match_pct    = 100 * telco_match / count_out if count_out > 0 else 0
-    telco_cov          = 100 * telco_nn_total / (68 * count_out) if count_out > 0 else 0
-    cadastro_match_pct = 100 * cadastro_match / count_out if count_out > 0 else 0
-    cadastro_cov       = 100 * cadastro_nn_total / (24 * count_out) if count_out > 0 else 0
-
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - ABT v4 (Score_01 + Score_02 + Telco + Cadastro)")
+    print("RELATORIO FINAL - ABT v4 (Score_01 + Score_02 + Telco + Cadastro)")
     print("="*80)
-    print(f"\n    Registros ABT (grain 1:1 CPF+SAFRA):    {count_out:>12,}")
-    print(f"    Chaves distintas (num_cpf+safra):       {distinct_keys:>12,}  [esperado = total]")
-    print(f"    Unicidade OK:                           {'SIM' if count_out == distinct_keys else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 1 - NUM_CPF nulos:                 {nulos_cpf:>12,}  [esperado = 0]")
-    print(f"    Gate 2 - SAFRA nulos:                   {nulos_safra:>12,}  [esperado = 0]")
-    print(f"\n    FLAG_INSTALACAO = 1 (instalados):       {instalados:>12,}  ({100*instalados/count_out:.2f}%)")
-    print(f"    FLAG_INSTALACAO = 0 (nao instalados):  {nao_inst:>12,}  ({100*nao_inst/count_out:.2f}%)")
-    print(f"\n    FPD = 1 (default):                      {fpd_1:>12,}  ({100*fpd_1/count_out:.2f}%)")
-    print(f"    FPD = 0 (nao default):                  {fpd_0:>12,}  ({100*fpd_0/count_out:.2f}%)")
-    print(f"\n    Gate 3 - FPD sem FLAG_INSTALACAO=1:     {fpd_sem_inst:>12,}  [esperado = 0 — anti-leakage]")
-    print(f"    Anti-leakage OK:                        {'SIM' if fpd_sem_inst == 0 else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 4 - SCORE_01_ADJ cobertura:        {score01_cov:>11.2f}%  [esperado ~98.18%]")
-    print(f"    Gate 5 - SCORE_02_ADJ cobertura:        {score02_cov:>11.2f}%  [esperado ~99.95%]")
-    print(f"\n    Gate 6 - Telco match (LEFT JOIN):       {telco_match:>12,}  ({telco_match_pct:.2f}%)  [esperado ~35.46%]")
-    print(f"    Gate 7 - Telco cobertura agregada:      {telco_cov:>11.2f}%  [68 vars]")
-    print(f"\n    Gate 8 - Cadastro match (LEFT JOIN):    {cadastro_match:>12,}  ({cadastro_match_pct:.2f}%)  [esperado ~35-40%]")
-    print(f"    Gate 9 - Cadastro cobertura agregada:   {cadastro_cov:>11.2f}%  [24 vars]")
+
+    # Distribuicao de labels
+    dist_flag = df_abt.groupBy("flag_instalacao_int").count().collect()
+    dist_fpd = df_abt.filter(F.col("fpd_int").isNotNull()).groupBy("fpd_int").count().collect()
+
+    print("\n>>> [Stats] FLAG_INSTALACAO (decisao observada):")
+    for row in dist_flag:
+        pct = row["count"] * 100 / count_out
+        print(f"    FLAG={row['flag_instalacao_int']}: {row['count']:>10} ({pct:>5.2f}%)")
+
+    print("\n>>> [Stats] FPD (target, observado SO em FLAG_INSTALACAO=1):")
+    for row in dist_fpd:
+        pct = row["count"] * 100 / count_out
+        print(f"    FPD={row['fpd_int']}: {row['count']:>10} ({pct:>5.2f}%)")
+
+    # Completude de features v1, v2
+    score01_null = df_abt.filter(F.col("score_01_adj").isNull()).count()
+    score02_null = df_abt.filter(F.col("score_02_adj").isNull()).count()
+
+    score01_coverage = (count_out - score01_null) * 100 / count_out
+    score02_coverage = (count_out - score02_null) * 100 / count_out
+
+    print(f"\n>>> [Features v1-v2] Completude:")
+    print(f"    SCORE_01_ADJ: {score01_coverage:.2f}%")
+    print(f"    SCORE_02_ADJ: {score02_coverage:.2f}%")
+
+    # Completude de features v3 (Telco)
+    telco_var_nulls = {}
+    for var_idx in range(26, 94):
+        var_col = f"var_{var_idx}_adj"
+        if var_col in df_abt.columns:
+            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            telco_var_nulls[var_idx] = null_count
+
+    telco_total_nulls = sum(telco_var_nulls.values())
+    telco_total_cells = len(telco_var_nulls) * count_out
+    telco_coverage = ((telco_total_cells - telco_total_nulls) / telco_total_cells) * 100 if telco_total_cells > 0 else 0
+
+    print(f"\n>>> [Features v3 - Telco] Completude:")
+    print(f"    Cobertura agregada Telco (var_26-93): {telco_coverage:.2f}%")
+    print(f"    Total celulas Telco: {telco_total_cells:>12}")
+    print(f"    Celulas NULLs: {telco_total_nulls:>12}")
+
+    # Completude de features v4 (Cadastro)
+    cadastro_var_nulls = {}
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx}"
+        if var_col in df_abt.columns:
+            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            cadastro_var_nulls[var_idx] = null_count
+
+    cadastro_total_nulls = sum(cadastro_var_nulls.values())
+    cadastro_total_cells = len(cadastro_var_nulls) * count_out
+    cadastro_coverage = ((cadastro_total_cells - cadastro_total_nulls) / cadastro_total_cells) * 100 if cadastro_total_cells > 0 else 0
+
+    print(f"\n>>> [Features v4 - Cadastro] Completude:")
+    print(f"    Cobertura agregada Cadastro (var_02-25): {cadastro_coverage:.2f}%")
+    print(f"    Total celulas Cadastro: {cadastro_total_cells:>12}")
+    print(f"    Celulas NULLs: {cadastro_total_nulls:>12}")
+
+    # Breakdown por variavel de Cadastro (para debug)
+    print(f"\n>>> [Features v4 - Cadastro Detail] Distribuicao por variavel:")
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx:02d}"
+        if var_col in df_abt.columns:
+            null_count = df_abt.filter(F.col(var_col).isNull()).count()
+            coverage_pct = ((count_out - null_count) / count_out) * 100 if count_out > 0 else 0
+            print(f"      {var_col}: {coverage_pct:>6.2f}% ({count_out - null_count:>10} nao-NULL)")
+        else:
+            print(f"      {var_col}: NAO ENCONTRADO NA TABELA")
+
+    # Impacto do join (quantos registros encontraram match em Cadastro)
+    # Verificar se ha QUALQUER variavel de Cadastro (nao so var_02)
+    cadastro_match_conditions = []
+    for var_idx in range(2, 26):
+        var_col = f"var_{var_idx:02d}"
+        if var_col in df_abt.columns:
+            cadastro_match_conditions.append(F.col(var_col).isNotNull())
+
+    if cadastro_match_conditions:
+        # Se houver alguma condicao, usar OR
+        match_condition = cadastro_match_conditions[0]
+        for cond in cadastro_match_conditions[1:]:
+            match_condition = match_condition | cond
+        cadastro_match_count = df_abt.filter(match_condition).count()
+    else:
+        cadastro_match_count = 0
+
+    cadastro_match_pct = (cadastro_match_count / count_out) * 100 if count_out > 0 else 0
+
+    print(f"\n>>> [JOIN] Impacto Cadastro:")
+    print(f"    Total ABT v3 (spine): {count_in_v3:>12}")
+    print(f"    Total Cadastro (enriquecimento): {count_in_cadastro:>12}")
+    print(f"    Resultados ABT v4 (ABT v3 LEFT JOIN): {count_out:>12}")
+    print(f"    Registros com match Cadastro: {cadastro_match_count:>12} ({cadastro_match_pct:.2f}%)")
 
     print("\n" + "="*80)
     print(f"ABT v4 PRONTA PARA MODELAGEM")
-    print(f"  - Versao:          {GOLD_VERSION}")
-    print(f"  - Feature blocks:  Score_01, Score_02, Telco (68 vars), Cadastro (24 vars)")
-    print(f"  - Registros:       {count_out:,}")
-    print(f"  - Actions:         2 (join+write + agg ABT escrita)")
-    print(f"  - Grao:            1:1 NUM_CPF + SAFRA")
-    print(f"  - Target:          FPD_INT (observado em FLAG_INSTALACAO=1)")
-    print(f"  - Proximo passo:   abt_v5_builder.py")
+    print(f"  - Versao: {GOLD_VERSION}")
+    print(f"  - Feature blocks: Score_01, Score_02, Telco (68 variaveis), Cadastro (24 variaveis)")
+    print(f"  - Total registros: {count_out}")
+    print(f"  - Grao: 1:1 NUM_CPF + SAFRA")
+    print(f"  - Target: FPD_INT (observado em FLAG_INSTALACAO=1)")
+    print(f"  - Status: Incremental (Cadastro adiciona {cadastro_coverage:.1f}% cobertura, {cadastro_match_pct:.1f}% match)")
     print("="*80 + "\n")
 
 if __name__ == "__main__":

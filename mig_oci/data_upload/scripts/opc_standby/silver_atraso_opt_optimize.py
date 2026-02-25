@@ -1,34 +1,25 @@
-# Arquivo: scripts/opc_standby/silver_atraso_opt_z.py
-# OPCAO Z: sem cache, quality na Silver JA ESCRITA + Coalesce DINAMICO
-# Padrao opt_z aplicado ao atraso. SEM dedup (grain multiplo por design).
+# Arquivo: scripts/opc_standby/silver_atraso_opt_optimize.py
+# OPCAO OPTIMIZE: opt_z + Delta OPTIMIZE apos escrita
+# Elimina necessidade de calibrar BYTES_PER_ROW_ESTIMATE manualmente.
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
-SCRIPT: silver_atraso_opt_z.py — OPCAO Z
-OBJETIVO: Bronze -> Silver Atraso sem cache, quality sobre arquivo escrito,
-          com numero de arquivos de saida calculado dinamicamente.
+SCRIPT: silver_atraso_opt_optimize.py — OPCAO OPTIMIZE
+OBJETIVO: Bronze -> Silver Atraso com Delta OPTIMIZE pos-escrita.
 --------------------------------------------------------------------------------
 PARTICULARIDADE CRITICA — GRAIN MULTIPLO:
-  Atraso e snapshot mensal de faturamento: multiplas linhas por CPF
-  (faturas, itens, ajustes). NAO ha dedup — cada linha e um registro
-  distinto e contem sinal de risco independente.
-  Remover linhas = perder sinal → NUNCA aplicar dedup agressiva aqui.
+  Atraso e snapshot mensal: multiplas linhas por CPF (faturas, itens, ajustes).
+  NAO ha dedup de nenhum tipo — remover linhas = perder sinal de risco.
 
-  Diferenca vs telco/cadastro: ambos tinham grain 1:1 (dedup defensivo ok).
-  Diferenca vs pagamento: pagamento tinha regra de negocio de versionamento.
-  Atraso: nem defensivo nem negocio — simplesmente nao ha dedup.
+ARQUITETURA (2 actions + OPTIMIZE):
+  action 1: coalesce(N).write() → grava Silver
+  OPTIMIZE → Delta reorganiza para ~128MB por arquivo
+  action 2: agg(Silver pos-OPTIMIZE) → quality check no arquivo real
 
-ARQUITETURA (3 actions):
-  action 1: count() pre-write   → calcula num_output_files
-  action 2: coalesce(N).write() → grava Silver
-  action 3: agg(Silver escrita) → quality check no arquivo real
-
-DIFERENCA VS ORIGINAL (silver_atraso.py):
-  - SEM dedup (mantido — ja era assim no original)
-  - 3 actions em vez de 6 (count_bronze + count_silver + 4 quality counts)
-  - Coalesce dinamico (~128MB por arquivo)
-  - Quality consolidado em unico agg() na Silver escrita
-  - to_double_safe sem regex (cast direto)
+VANTAGEM EM ATRASO:
+  + Volume potencialmente alto (grain multiplo) → BYTES_PER_ROW dificil de
+    estimar sem rodar primeiro. OPTIMIZE garante ~128MB sem calibracao.
+  + Especialmente util em 1a execucao antes de calibrar opt_z.
 --------------------------------------------------------------------------------
 """
 
@@ -36,6 +27,7 @@ import sys
 import argparse
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from delta.tables import DeltaTable
 
 # =============================================================================
 # UTILITY FUNCTIONS (inlined from spark_utils.py para OCI Data Flow)
@@ -85,11 +77,14 @@ COLS_WITH_SENTINELA = {
     "DW_FAIXA_AGING_PROX_FECH": "flag_faixa_aging_prox_fech_sentinela"
 }
 
-# Bytes estimados por registro na Silver (para coalesce dinamico)
-# Atraso: grain multiplo → volume potencialmente alto
-# Calibrar apos 1o run: BYTES = tamanho_total_MB * 1024 * 1024 / count_registros
-BYTES_PER_ROW_ESTIMATE = 120
+# Tamanho alvo por arquivo apos OPTIMIZE
 TARGET_FILE_SIZE_MB = 128
+
+# Coalesce inicial antes do OPTIMIZE (generoso — OPTIMIZE vai reorganizar)
+INITIAL_COALESCE = 20
+
+# VACUUM: remover arquivos pre-OPTIMIZE
+VACUUM_RETENTION_HOURS = 0
 # =============================================================================
 
 
@@ -150,7 +145,7 @@ def build_silver_atraso(df_bronze):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ETL Bronze to Silver Atraso - Opt-Z")
+    parser = argparse.ArgumentParser(description="ETL Bronze to Silver Atraso - Opt-Optimize")
     parser.add_argument("--input_path", help="Caminho Bronze Atraso")
     parser.add_argument("--output_path", help="Caminho destino Silver Atraso")
     parser.add_argument("--format", default=DEFAULT_FORMAT)
@@ -167,7 +162,15 @@ def main():
             format = DEFAULT_FORMAT
         args = Args()
 
-    spark = SparkSession.builder.appName("Silver_Atraso_OptZ").getOrCreate()
+    spark = SparkSession.builder.appName("Silver_Atraso_Optimize").getOrCreate()
+
+    # Necessario para VACUUM com retencao 0h
+    if VACUUM_RETENTION_HOURS == 0:
+        spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+
+    # Alvo de bin-packing do OPTIMIZE: 128MB por arquivo
+    # Default Delta open-source = 1GB — sem isso, gera arquivos de ~1GB
+    spark.conf.set("spark.databricks.delta.targetFileSize", str(TARGET_FILE_SIZE_MB * 1024 * 1024))
 
     # =========================================================================
     # 1) LEITURA BRONZE
@@ -182,30 +185,16 @@ def main():
     # =========================================================================
     # 2) BUILD SILVER
     # SEM dedup: grain multiplo por design (faturas/itens por CPF).
-    # Remover linhas = perder sinal de risco.
     # =========================================================================
     df_silver = build_silver_atraso(df_bronze)
 
     # =========================================================================
-    # 3) COALESCE DINAMICO — ACTION 1
-    # =========================================================================
-    print(">>> [Coalesce] Contando registros para calcular coalesce dinamico...")
-    count_pre = df_silver.count()
-    print(f">>> [Info] Registros Silver: {count_pre:,}")
-
-    estimated_size_mb = count_pre * BYTES_PER_ROW_ESTIMATE / (1024 * 1024)
-    num_output_files = max(1, int(estimated_size_mb / TARGET_FILE_SIZE_MB))
-    print(f">>> [Info] Coalesce dinamico: {num_output_files} arquivos (~{TARGET_FILE_SIZE_MB}MB cada)")
-    print(f">>> [Info] Tamanho estimado total: {estimated_size_mb:.0f} MB")
-    print(f">>> [Info] ATENCAO: BYTES_PER_ROW_ESTIMATE={BYTES_PER_ROW_ESTIMATE} e estimativa inicial.")
-    print(f"           Calibrar apos 1o run: BYTES = tamanho_real_MB * 1024 * 1024 / {count_pre}")
-
-    # =========================================================================
-    # 4) ESCRITA SILVER — ACTION 2
+    # 3) ESCRITA SILVER — ACTION 1
     # =========================================================================
     print(f">>> [Escrita] Salvando Silver Atraso (Delta): {args.output_path}")
+    print(f">>> [Info] Coalesce inicial: {INITIAL_COALESCE} particoes (sera otimizado pelo OPTIMIZE)")
 
-    df_silver.coalesce(num_output_files) \
+    df_silver.coalesce(INITIAL_COALESCE) \
         .write \
         .format("delta") \
         .mode("overwrite") \
@@ -216,10 +205,21 @@ def main():
     print(">>> [Escrita] Silver gravada com sucesso.")
 
     # =========================================================================
-    # 5) QUALITY CHECKS na Silver JA ESCRITA — ACTION 3
-    # Quality consolidado em unico agg() — substitui 4 count() do original.
+    # 4) DELTA OPTIMIZE (bin-packing para ~128MB por arquivo)
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo Silver gravada para validacao: {args.output_path}")
+    print(f"\n>>> [Optimize] Executando Delta OPTIMIZE em: {args.output_path}")
+    dt = DeltaTable.forPath(spark, args.output_path)
+    dt.optimize().executeCompaction()
+    print(">>> [Optimize] Compactacao concluida.")
+
+    print(f">>> [Vacuum] Removendo arquivos antigos (retencao: {VACUUM_RETENTION_HOURS}h)...")
+    dt.vacuum(VACUUM_RETENTION_HOURS)
+    print(">>> [Vacuum] Limpeza concluida.")
+
+    # =========================================================================
+    # 5) QUALITY CHECKS na Silver pos-OPTIMIZE — ACTION 2
+    # =========================================================================
+    print(f"\n>>> [Quality] Lendo Silver pos-OPTIMIZE para validacao: {args.output_path}")
     df_written = spark.read.format("delta").load(args.output_path)
 
     quality = df_written.agg(
@@ -231,16 +231,16 @@ def main():
         F.countDistinct("num_cpf").alias("cpfs_distintos"),
     ).collect()[0]
 
-    count_out           = quality["total"]
-    invalidos_ref       = quality["invalidos_ref"]
-    nulos_cpf           = quality["nulos_cpf"]
-    missing_status      = quality["missing_status_fat"]
-    sentinela_plat      = quality["sentinela_plataforma"]
-    cpfs_distintos      = quality["cpfs_distintos"]
-    linhas_por_cpf      = count_out / cpfs_distintos if cpfs_distintos > 0 else 0
+    count_out       = quality["total"]
+    invalidos_ref   = quality["invalidos_ref"]
+    nulos_cpf       = quality["nulos_cpf"]
+    missing_status  = quality["missing_status_fat"]
+    sentinela_plat  = quality["sentinela_plataforma"]
+    cpfs_distintos  = quality["cpfs_distintos"]
+    linhas_por_cpf  = count_out / cpfs_distintos if cpfs_distintos > 0 else 0
 
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER ATRASO (OPT-Z)")
+    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER ATRASO (OPT-OPTIMIZE)")
     print("="*80)
     print(f"\n    Registros Silver (sem dedup — grain multiplo): {count_out:>12,}")
     print(f"    CPFs distintos:                               {cpfs_distintos:>12,}")
@@ -251,12 +251,13 @@ def main():
     print(f"    Gate 4 - COD_PLATAFORMA sentinela:           {sentinela_plat:>12,}  ({100*sentinela_plat/count_out:.2f}%)")
 
     print("\n" + "="*80)
-    print("Silver ATRASO concluido — opt_z (sem cache, sem dedup, coalesce dinamico)")
+    print("Silver ATRASO concluido — opt_optimize (sem dedup + OPTIMIZE ~128MB)")
     print(f"  - Registros:          {count_out:,}")
-    print(f"  - Arquivos de saida:  {num_output_files} (~{TARGET_FILE_SIZE_MB}MB cada)")
-    print(f"  - Actions:            3 (count + write + agg Silver escrita)")
+    print(f"  - Arquivos de saida:  ~{TARGET_FILE_SIZE_MB}MB cada (garantido pelo OPTIMIZE)")
+    print(f"  - Actions:            2 (write + agg pos-OPTIMIZE)")
     print(f"  - Dedup:              NENHUM (grain multiplo — cada linha e sinal de risco)")
-    print(f"  - BYTES_PER_ROW:      {BYTES_PER_ROW_ESTIMATE} (estimativa inicial — calibrar apos run)")
+    print(f"  - OPTIMIZE:           sim (targetFileSize={TARGET_FILE_SIZE_MB}MB)")
+    print(f"  - VACUUM:             sim ({VACUUM_RETENTION_HOURS}h retencao)")
     print(f"  - Proximo passo:      gold_atraso.py")
     print("="*80 + "\n")
 

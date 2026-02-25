@@ -1,6 +1,7 @@
-# Arquivo: mig_oci/data_upload/scripts/gold_recarga.py
-# Adaptado de src/jobs/02_gold/gold_recarga_features_v2.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/gold_recarga_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# 5 actions pre-escrita: count_silver + count_gold + gerar_relatorio_qualidade (3 actions) + write
+# Referencia para comparacao com gold_recarga.py (optz)
 """
 ================================================================================
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
@@ -896,7 +897,7 @@ Exemplos de uso:
     print("\n")
 
     # Inicializar Spark
-    spark = SparkSession.builder.appName("gold_recarga_optz").getOrCreate()
+    spark = SparkSession.builder.appName("gold_recarga_original").getOrCreate()
 
     # =========================================================================
     # 1) LEITURA SILVER RECARGA
@@ -909,13 +910,27 @@ Exemplos de uso:
         print(f"!!! ERRO CRITICO NA LEITURA: {e}")
         sys.exit(1)
 
-    print(f">>> [Info] Colunas disponiveis na Silver: {len(df_silver.columns)}")
+    count_silver = df_silver.count()
+    print(f">>> [Info] Registros na Silver: {count_silver:,}")
+    print(f">>> [Info] Colunas disponiveis: {len(df_silver.columns)}")
 
     # =========================================================================
-    # 2) PROCESSAMENTO — ACTION 1 (groupBy + write)
+    # 2) PROCESSAMENTO
     # =========================================================================
     df_gold = criar_features_recarga_completas(df_silver)
 
+    count_gold = df_gold.count()
+    print(f">>> [Info] Registros no Gold: {count_gold:,}")
+    print(f">>> [Info] Colunas geradas: {len(df_gold.columns)}")
+
+    # =========================================================================
+    # 3) RELATORIO DE QUALIDADE
+    # =========================================================================
+    gerar_relatorio_qualidade(df_gold, count_silver)
+
+    # =========================================================================
+    # 4) ESCRITA
+    # =========================================================================
     if not args.skip_save:
         print(f"\n>>> [Escrita] Salvando Gold Recarga Features (Delta): {args.output_path}")
 
@@ -927,65 +942,31 @@ Exemplos de uso:
             .option("overwriteSchema", "true") \
             .save(args.output_path)
 
-        print(f">>> [Escrita] Gold gravada com sucesso.")
-
-        # =====================================================================
-        # 3) QUALITY CHECK na Gold JA ESCRITA — ACTION 2
-        # =====================================================================
-        print(f"\n>>> [Quality] Lendo Gold gravada para validacao: {args.output_path}")
-        df_written = spark.read.format("delta").load(args.output_path)
-
-        quality = df_written.agg(
-            F.count("*").alias("total"),
-            F.countDistinct("num_cpf", "safra_recarga").alias("distinct_keys"),
-            F.countDistinct("num_cpf").alias("cpfs_distintos"),
-            F.countDistinct("safra_recarga").alias("safras_distintas"),
-            F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-            F.sum(F.when(F.col("flag_teve_sos_mes") == 1, 1).otherwise(0)).alias("com_sos"),
-            F.sum(F.when(F.col("flag_sem_recarga_mes") == 1, 1).otherwise(0)).alias("sem_recarga"),
-            F.sum(F.when(F.col("flag_baixa_atividade_mes") == 1, 1).otherwise(0)).alias("baixa_atividade"),
-            F.avg("qtd_recargas_mes").alias("media_recargas_mes"),
-            F.avg("ticket_medio_mes").alias("media_ticket"),
-        ).collect()[0]
-
-        count_gold      = quality["total"]
-        distinct_keys   = quality["distinct_keys"]
-        cpfs            = quality["cpfs_distintos"]
-        safras          = quality["safras_distintas"]
-        nulos_cpf       = quality["nulos_cpf"]
-        com_sos         = quality["com_sos"]
-        sem_recarga     = quality["sem_recarga"]
-        baixa_ativ      = quality["baixa_atividade"]
-        media_recargas  = quality["media_recargas_mes"]
-        media_ticket    = quality["media_ticket"]
-
-        print("\n" + "="*80)
-        print(">>> [Quality] RELATORIO DE QUALIDADE - GOLD RECARGA")
-        print("="*80)
-        print(f"\n    Registros Gold (1 linha/CPF+SAFRA):      {count_gold:>12,}")
-        print(f"    Chaves distintas (num_cpf+safra):        {distinct_keys:>12,}  [esperado = total]")
-        print(f"    Unicidade OK:                            {'SIM' if count_gold == distinct_keys else 'NAO — VERIFICAR'}")
-        print(f"\n    CPFs distintos:                          {cpfs:>12,}")
-        print(f"    Safras distintas:                        {safras:>12,}")
-        print(f"\n    Gate 1 - NUM_CPF nulos:                  {nulos_cpf:>12,}  [esperado = 0]")
-        print(f"\n    Cobertura SOS:                           {com_sos:>12,}  ({100*com_sos/count_gold:.2f}%)")
-        print(f"    Flag sem recarga no mes:                 {sem_recarga:>12,}  ({100*sem_recarga/count_gold:.2f}%)")
-        print(f"    Flag baixa atividade (<2 recargas):      {baixa_ativ:>12,}  ({100*baixa_ativ/count_gold:.2f}%)")
-        print(f"\n    Media recargas/mes:                      {media_recargas:>12.2f}")
-        print(f"    Ticket medio (media):                    R$ {media_ticket:>10.2f}")
-
-        print("\n" + "="*80)
-        print("Gold RECARGA concluido")
-        print(f"  - Registros:          {count_gold:,}")
-        print(f"  - Compressao:         Silver (eventos) → Gold (1 linha/CPF+SAFRA)")
-        print(f"  - Actions:            2 (groupBy+write + agg Gold escrita)")
-        print(f"  - Particionamento:    safra_recarga")
-        print(f"  - Features geradas:   {len(df_written.columns) - 5} (excluindo metadados)")
-        print(f"  - Proximo passo:      abt_v5_builder.py / abt_v6_builder.py")
-        print("="*80 + "\n")
-
+        print(f">>> [Sucesso] Dados salvos em: {args.output_path}")
     else:
         print("\n>>> [Skip] Salvamento pulado (--skip_save)")
+
+    # =========================================================================
+    # 5) RESUMO FINAL
+    # =========================================================================
+    print("\n" + "="*80)
+    print("PROCESSAMENTO CONCLUIDO COM SUCESSO!")
+    print("="*80)
+    print(f"""
+    Resumo:
+    +-- Silver (eventos):     {count_silver:>15,} registros
+    +-- Gold (cliente-mes):   {count_gold:>15,} registros
+    +-- Compressao:           {count_silver/count_gold:>15.1f}x
+    +-- Features geradas:     {len(df_gold.columns) - 5:>15} (excluindo metadados)
+    +-- Output:               {args.output_path}
+
+    Proximos passos:
+    1. JOIN com spine (ABT v4) por (NUM_CPF, SAFRA)
+    2. Filtrar por janela temporal (SAFRA_RECARGA < SAFRA)
+    3. Agregar M1/M3/M6 usando dt_recarga_safra vs dt_safra
+    4. Validar cobertura e gates de qualidade
+    """)
+    print("="*80 + "\n")
 
     return df_gold
 

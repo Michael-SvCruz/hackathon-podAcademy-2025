@@ -1,6 +1,7 @@
-# Arquivo: mig_oci/data_upload/scripts/abt_v6_builder.py
-# Adaptado de src/jobs/02_gold/05_gold_abt_v6_builder_v2.py para OCI Data Flow
-# Mudancas: paths OCI, imports flat, sem saveAsTable
+# Arquivo: scripts/opc_standby/abt_v6_builder_original.py
+# VERSAO ORIGINAL: primeira adaptacao Databricks -> OCI Data Flow
+# Muitas actions: count_v5 + 2x df.count() leituras + count_v6 + validate_abt_v6 (5 actions) + gerar_relatorio_final (4+ counts)
+# Referencia para comparacao com abt_v6_builder.py (optz)
 """
 ================================================================================
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
@@ -68,9 +69,9 @@ namespace = sys.argv[1] if len(sys.argv) > 1 else "default_namespace"
 # =============================================================================
 # CONFIGURACAO
 # =============================================================================
-DEFAULT_GOLD_ABT_V5_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v5/"
-DEFAULT_GOLD_PAGAMENTO_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/gold_pagamento_features/"
-DEFAULT_GOLD_ATRASO_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/gold_atraso_features/"
+DEFAULT_GOLD_ABT_V5_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v5_v2/"
+DEFAULT_GOLD_PAGAMENTO_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/pagamento_features_v2/"
+DEFAULT_GOLD_ATRASO_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/atraso_features_v2/"
 DEFAULT_OUTPUT_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/abt_v6_v2/"
 DEFAULT_FORMAT = "delta"
 GOLD_VERSION = "gold_abt_v6_v2"
@@ -391,7 +392,7 @@ def main():
     print("=" * 78)
     print("\n")
 
-    spark = SparkSession.builder.appName("abt_v6_optz").getOrCreate()
+    spark = SparkSession.builder.appName("abt_v6_original").getOrCreate()
 
     # =========================================================================
     # LEITURA
@@ -402,121 +403,79 @@ def main():
     except Exception as e:
         print(f"!!! ERRO ABT v5: {e}")
         sys.exit(1)
+    count_v5 = df_abt_v5.count()
+    print(f"    Registros: {count_v5:,}")
 
-    print(f">>> [Leitura] Pagamento Features: {args.pagamento_path}")
+    print(f"\n>>> [Leitura] Pagamento Features: {args.pagamento_path}")
     try:
         df_pag = spark.read.format(args.format).load(args.pagamento_path)
     except Exception as e:
         print(f"!!! ERRO Pagamento: {e}")
         sys.exit(1)
+    print(f"    Registros: {df_pag.count():,}")
 
-    print(f">>> [Leitura] Atraso Features: {args.atraso_path}")
+    print(f"\n>>> [Leitura] Atraso Features: {args.atraso_path}")
     try:
         df_atr = spark.read.format(args.format).load(args.atraso_path)
     except Exception as e:
         print(f"!!! ERRO Atraso: {e}")
         sys.exit(1)
+    print(f"    Registros: {df_atr.count():,}")
 
     # =========================================================================
-    # BUILD ABT V6 + ESCRITA — ACTION 1
+    # BUILD
     # =========================================================================
     df_abt_v6 = build_abt_v6(df_abt_v5, df_pag, df_atr)
 
+    count_v6 = df_abt_v6.count()
+    print(f"\n>>> [Info] ABT v6: {count_v6:,} registros, {len(df_abt_v6.columns)} colunas")
+
+    # =========================================================================
+    # VALIDACAO
+    # =========================================================================
+    if not args.skip_validate:
+        validate_abt_v6(df_abt_v6, count_v5)
+
+    # =========================================================================
+    # RELATORIO
+    # =========================================================================
+    gerar_relatorio_final(df_abt_v6, count_v5)
+
+    # =========================================================================
+    # ESCRITA
+    # =========================================================================
     if not args.skip_save:
-        print(f">>> [Escrita] Salvando ABT v6 (Delta): {args.output_path}")
+        print(f"\n>>> [Escrita] Salvando: {args.output_path}")
         df_abt_v6.write \
             .format("delta") \
             .mode("overwrite") \
             .option("mergeSchema", "true") \
             .option("overwriteSchema", "true") \
             .save(args.output_path)
-        print(">>> [Escrita] ABT v6 gravada com sucesso.")
-    else:
-        print(">>> [Skip] Salvamento pulado (--skip_save)")
-        return df_abt_v6
 
     # =========================================================================
-    # QUALITY CHECK na ABT JA ESCRITA — ACTION 2
+    # RESUMO
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo ABT v6 gravada para validacao: {args.output_path}")
-    df_written = spark.read.format("delta").load(args.output_path)
-
-    quality = df_written.agg(
-        F.count("*").alias("total"),
-        F.countDistinct("num_cpf", "safra").alias("distinct_keys"),
-        F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
-        F.sum(F.when(F.col("safra").isNull(), 1).otherwise(0)).alias("nulos_safra"),
-        # Anti-leakage gates
-        F.sum(F.when(F.col("flag_instalacao_int") == 1, 1).otherwise(0)).alias("instalados"),
-        F.sum(F.when(F.col("flag_instalacao_int") == 0, 1).otherwise(0)).alias("nao_instalados"),
-        F.sum(F.when(F.col("fpd_int") == 1, 1).otherwise(0)).alias("fpd_1"),
-        F.sum(F.when(F.col("fpd_int") == 0, 1).otherwise(0)).alias("fpd_0"),
-        F.sum(F.when(
-            (F.col("fpd_int").isNotNull()) & (F.col("flag_instalacao_int") == 0), 1
-        ).otherwise(0)).alias("fpd_sem_instalacao"),
-        # Cobertura scores
-        F.sum(F.when(F.col("score_01_adj").isNull(), 1).otherwise(0)).alias("score01_null"),
-        F.sum(F.when(F.col("score_02_adj").isNull(), 1).otherwise(0)).alias("score02_null"),
-        # Cobertura blocos de features (match = tem dado na janela)
-        F.sum(F.when(F.col("var_26_adj").isNotNull(), 1).otherwise(0)).alias("telco_match"),
-        F.sum(F.when(F.col("qtd_recargas_m1") > 0, 1).otherwise(0)).alias("recarga_m1"),
-        F.sum(F.when(F.col("qtd_meses_dados_pag_m1") > 0, 1).otherwise(0)).alias("pagamento_m1"),
-        F.sum(F.when(F.col("qtd_meses_dados_atr_m1") > 0, 1).otherwise(0)).alias("atraso_m1"),
-    ).collect()[0]
-
-    count_out       = quality["total"]
-    distinct_keys   = quality["distinct_keys"]
-    nulos_cpf       = quality["nulos_cpf"]
-    nulos_safra     = quality["nulos_safra"]
-    instalados      = quality["instalados"]
-    nao_inst        = quality["nao_instalados"]
-    fpd_1           = quality["fpd_1"]
-    fpd_0           = quality["fpd_0"]
-    fpd_sem_inst    = quality["fpd_sem_instalacao"]
-    score01_null    = quality["score01_null"]
-    score02_null    = quality["score02_null"]
-    telco_match     = quality["telco_match"]
-    recarga_m1      = quality["recarga_m1"]
-    pagamento_m1    = quality["pagamento_m1"]
-    atraso_m1       = quality["atraso_m1"]
-
-    score01_cov     = 100 * (count_out - score01_null) / count_out if count_out > 0 else 0
-    score02_cov     = 100 * (count_out - score02_null) / count_out if count_out > 0 else 0
-    telco_pct       = 100 * telco_match / count_out if count_out > 0 else 0
-    rec_m1_pct      = 100 * recarga_m1 / count_out if count_out > 0 else 0
-    pag_m1_pct      = 100 * pagamento_m1 / count_out if count_out > 0 else 0
-    atr_m1_pct      = 100 * atraso_m1 / count_out if count_out > 0 else 0
-
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - ABT v6 (FINAL)")
+    print("ABT V6 V2 CONSTRUIDO COM SUCESSO!")
     print("="*80)
-    print(f"\n    Registros ABT (grain 1:1 CPF+SAFRA):    {count_out:>12,}")
-    print(f"    Chaves distintas (num_cpf+safra):       {distinct_keys:>12,}  [esperado = total]")
-    print(f"    Unicidade OK:                           {'SIM' if count_out == distinct_keys else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 1 - NUM_CPF nulos:                 {nulos_cpf:>12,}  [esperado = 0]")
-    print(f"    Gate 2 - SAFRA nulos:                   {nulos_safra:>12,}  [esperado = 0]")
-    print(f"\n    FLAG_INSTALACAO = 1 (instalados):       {instalados:>12,}  ({100*instalados/count_out:.2f}%)")
-    print(f"    FLAG_INSTALACAO = 0 (nao instalados):  {nao_inst:>12,}  ({100*nao_inst/count_out:.2f}%)")
-    print(f"\n    FPD = 1 (default):                      {fpd_1:>12,}  ({100*fpd_1/count_out:.2f}%)")
-    print(f"    FPD = 0 (nao default):                  {fpd_0:>12,}  ({100*fpd_0/count_out:.2f}%)")
-    print(f"\n    Gate 3 - FPD sem FLAG_INSTALACAO=1:     {fpd_sem_inst:>12,}  [esperado = 0 — anti-leakage]")
-    print(f"    Anti-leakage OK:                        {'SIM' if fpd_sem_inst == 0 else 'NAO — VERIFICAR'}")
-    print(f"\n    Gate 4 - SCORE_01_ADJ cobertura:        {score01_cov:>11.2f}%  [esperado ~98.18%]")
-    print(f"    Gate 5 - SCORE_02_ADJ cobertura:        {score02_cov:>11.2f}%  [esperado ~99.95%]")
-    print(f"    Gate 6 - Telco match:                   {telco_match:>12,}  ({telco_pct:.2f}%)  [esperado ~35.46%]")
-    print(f"    Gate 7 - Recarga M1 cobertura:          {recarga_m1:>12,}  ({rec_m1_pct:.2f}%)  [esperado ~56.12%]")
-    print(f"    Gate 8 - Pagamento M1 cobertura:        {pagamento_m1:>12,}  ({pag_m1_pct:.2f}%)  [esperado ~16.13%]")
-    print(f"    Gate 9 - Atraso M1 cobertura:           {atraso_m1:>12,}  ({atr_m1_pct:.2f}%)  [esperado ~21.79%]")
+    print(f"""
+    Resumo:
+    +-- ABT v5 (input):      {count_v5:>12,} registros
+    +-- ABT v6 (output):     {count_v6:>12,} registros
+    +-- Colunas totais:      {len(df_abt_v6.columns):>12}
+    +-- Output:              {args.output_path}
 
-    print("\n" + "="*80)
-    print(f"ABT v6 PRONTA PARA MODELAGEM (VERSAO FINAL)")
-    print(f"  - Versao:          {GOLD_VERSION}")
-    print(f"  - Feature blocks:  Score_01, Score_02, Telco, Cadastro, Recarga, Pagamento, Atraso")
-    print(f"  - Registros:       {count_out:,}")
-    print(f"  - Actions:         2 (join+write + agg ABT escrita)")
-    print(f"  - Grao:            1:1 NUM_CPF + SAFRA")
-    print(f"  - Target:          FPD_INT (observado em FLAG_INSTALACAO=1)")
-    print(f"  - Total colunas:   {len(df_written.columns)}")
+    Feature Blocks:
+    +-- Score_01, Score_02
+    +-- Telco (68 vars)
+    +-- Cadastro (33 vars)
+    +-- Recarga v2 (60+ features, M1/M3/M6)
+    +-- Pagamento v2 (50+ features, M1/M3/M6)
+    +-- Atraso v2 (60+ features, M1/M3/M6)
+
+    Total: ~250+ features para modelagem
+    """)
     print("="*80 + "\n")
 
     return df_abt_v6

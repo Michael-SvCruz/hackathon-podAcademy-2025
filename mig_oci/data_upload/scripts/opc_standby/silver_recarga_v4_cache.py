@@ -1,37 +1,33 @@
-# Arquivo: scripts/silver_recarga.py
-# PRINCIPAL — sem cache, quality na Silver JA ESCRITA + Coalesce DINAMICO
-# Promovido de opt_z em 20/02/2026 (benchmark: 9m44s, 3GB lidos, 3 executors).
+# Arquivo: scripts/opc_standby/silver_recarga_v4_cache.py
+# VERSAO V4 (PRINCIPAL ANTERIOR) — cache + coalesce dinamico + 3 actions
+# Substituida pelo opt_y (10m32s) em 18/02/2026. Mantida como referencia historica.
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
-SCRIPT: silver_recarga.py — PRINCIPAL (opt_z promovido em 20/02/2026)
-OBJETIVO: Bronze -> Silver sem cache, quality sobre arquivo escrito,
-          com numero de arquivos de saida calculado dinamicamente.
+SCRIPT: silver_recarga_v4_cache.py — VERSAO ANTERIOR (baseline 18m25s)
+OBJETIVO: Bronze -> Silver com cache, coalesce dinamico, sem deduplicacao.
 --------------------------------------------------------------------------------
-ARQUITETURA (sem cache + coalesce dinamico):
-  action 1: count() pre-write   → calcula num_output_files + le Bronze 1x
-  action 2: coalesce(N).write() → le Bronze 1x (sem cache: 2a leitura)
-  action 3: agg(Silver escrita) → le Silver ~3GB do OCI para quality
+ARQUITETURA (cache + 3 actions):
+  df_silver.cache()
+  action 1: count()      → materializa cache (~100M records em JVM heap)
+  action 2: coalesce().write() → le do cache
+  action 3: agg().collect()    → le do cache
+  df_silver.unpersist()
 
-FLUXO (3 actions, 2 leituras Bronze + 1 leitura Silver):
-  Bronze(4GB OCI) → count()          [action 1 — le Bronze 1x para contar]
-  Bronze(4GB OCI) → write → Silver   [action 2 — le Bronze 1x para gravar]
-  Silver(3GB OCI) → agg+count        [action 3 — le Silver 1x para quality]
+FLUXO:
+  Bronze(4GB OCI) → cache(~15-20GB JVM) → write → Silver(OCI)
+                                         → agg   → metricas
 
 COALESCE DINAMICO:
-  num_files = max(1, int(count * BYTES_PER_ROW / (1024*1024) / TARGET_MB))
-  (~40 bytes/registro e uma estimativa conservadora para Delta comprimido)
+  num_files = max(1, int(count * 40 / (1024*1024) / 128))
+  (~40 bytes/registro em OCI → estima tamanho do arquivo de saida)
 
-VANTAGENS VS VERSAO ANTERIOR (opt_y — coalesce fixo 28):
-  + Adapta-se automaticamente se o volume crescer (ex: 200M registros)
-  + Sem risco de arquivos maiores que o target sem aviso
-  + Performance igual ou superior (9m44s vs 10m32s com 1 executor a mais)
-  + Sem pressao de memoria (sem cache)
-  + Quality valida o arquivo REAL no bucket (nao copia em memoria)
+PERFORMANCE MEDIDA (18/02/2026):
+  Duracao: 18m 25s | Data Read: 36GB | Data Written: 3GB
 
-HISTORICO DE PERFORMANCE (OCI Data Flow):
-  opt_y (2 executors): 10m 32s | 3GB lidos | 3GB escritos | coalesce fixo
-  opt_z (3 executors): 9m 44s  | 3GB lidos | 3GB escritos | coalesce dinamico <- ATUAL
+SUBSTITUIDA POR: silver_recarga_opt_y.py (10m32s, 3GB lidos)
+  Motivo: cache de 100M registros (~15-20GB Java objects) gera pressao de GC
+  e scans lentos. Reler Silver comprimida (~3GB Delta) do OCI e mais rapido.
 --------------------------------------------------------------------------------
 """
 
@@ -89,7 +85,6 @@ CODIGO_COLUMNS = [
 SENTINELAS = [-1, -2, -3]
 
 # Bytes estimados por registro na Silver (para coalesce dinamico)
-# ~40 bytes/registro e uma estimativa conservadora para Delta comprimido
 BYTES_PER_ROW_ESTIMATE = 40
 TARGET_FILE_SIZE_MB = 128
 # =============================================================================
@@ -197,7 +192,7 @@ def build_silver(df_bronze):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ETL Bronze to Silver - PRINCIPAL (sem cache + coalesce dinamico)")
+    parser = argparse.ArgumentParser(description="ETL Bronze to Silver - V4 (cache + coalesce dinamico)")
     parser.add_argument("--input_path", help="Caminho da Bronze (Delta)")
     parser.add_argument("--output_path", help="Caminho de destino na Silver (Delta)")
     parser.add_argument("--format", default=DEFAULT_FORMAT)
@@ -214,7 +209,7 @@ def main():
             format = DEFAULT_FORMAT
         args = Args()
 
-    spark = SparkSession.builder.appName("Silver_Recarga").getOrCreate()
+    spark = SparkSession.builder.appName("Silver_Recarga_V4Cache").getOrCreate()
 
     # =========================================================================
     # 1) LEITURA BRONZE
@@ -226,6 +221,9 @@ def main():
         print(f"!!! ERRO CRITICO NA LEITURA: {e}")
         sys.exit(1)
 
+    count_in = df_bronze.count()
+    print(f">>> [Info] Registros Bronze: {count_in}")
+
     # =========================================================================
     # 2) PADRONIZACAO + TRANSFORM
     # =========================================================================
@@ -234,24 +232,27 @@ def main():
     df_silver = build_silver(df_bronze)
 
     # =========================================================================
-    # 3) COALESCE DINAMICO — ACTION 1 (le Bronze 1x para contar)
-    # Executa count() pre-write para calcular o numero de arquivos de saida.
-    # Custo: 1 leitura extra do Bronze (~4GB).
-    # Beneficio: auto-adapta ao volume sem reconfigurar o script.
+    # 3) CACHE (materializa em memoria para reusar nas 3 actions seguintes)
     # =========================================================================
-    print(">>> [Coalesce] Contando registros para calcular coalesce dinamico...")
-    count_pre = df_silver.count()
-    print(f">>> [Info] Registros Silver: {count_pre}")
+    print(">>> [Cache] Materializando Silver em memoria dos executors...")
+    df_silver.cache()
 
-    estimated_size_mb = count_pre * BYTES_PER_ROW_ESTIMATE / (1024 * 1024)
+    # =========================================================================
+    # ACTION 1: count() — materializa o cache
+    # Necessario para calcular coalesce dinamico antes do write.
+    # Side effect: le Bronze 1x do OCI e popula o cache (~15-20GB JVM heap).
+    # =========================================================================
+    count_out = df_silver.count()
+    print(f">>> [Info] Registros Silver (apos transformacoes): {count_out}")
+
+    # Coalesce dinamico: estima tamanho do arquivo de saida
+    estimated_size_mb = count_out * BYTES_PER_ROW_ESTIMATE / (1024 * 1024)
     num_output_files = max(1, int(estimated_size_mb / TARGET_FILE_SIZE_MB))
     print(f">>> [Info] Coalesce dinamico: {num_output_files} arquivos (~{TARGET_FILE_SIZE_MB}MB cada)")
     print(f">>> [Info] Tamanho estimado total: {estimated_size_mb:.0f} MB")
 
     # =========================================================================
-    # 4) ESCRITA SILVER — ACTION 2 (le Bronze 1x para gravar; sem cache)
-    # Sem cache(): sem pressao de memoria. Pipeline e map puro (sem shuffle),
-    # entao Bronze e lida novamente a partir do OCI (2a leitura total).
+    # ACTION 2: write — le do cache
     # =========================================================================
     print(f">>> [Escrita] Salvando Silver (Delta): {args.output_path}")
 
@@ -266,72 +267,70 @@ def main():
     print(f">>> [Escrita] Silver gravada com sucesso.")
 
     # =========================================================================
-    # 5) QUALITY CHECKS na Silver JA ESCRITA — ACTION 3 (le Silver ~3GB do OCI)
-    # Valida o arquivo REAL no bucket, nao uma copia em memoria.
-    # Detecta falhas silenciosas de escrita que quality-on-cache nao detectaria.
+    # ACTION 3: agg() — quality checks sobre o cache
+    # Le do cache (nao do OCI), mas cache de ~15-20GB tem overhead de GC.
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo Silver gravada para validacao: {args.output_path}")
-    df_silver_written = spark.read.format("delta").load(args.output_path)
+    print("\n>>> [Quality] Executando quality checks sobre Silver em cache...")
 
-    print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER RECARGA")
-    print("="*80)
-
-    quality_metrics = df_silver_written.agg(
+    quality_metrics = df_silver.agg(
         F.count("*").alias("total"),
         F.sum(F.when(F.col("flag_ts_recarga_invalida") == 1, 1).otherwise(0)).alias("ts_invalida"),
         *[F.sum(F.when(F.col(f"flag_{val_col}_negativo") == 1, 1).otherwise(0)).alias(f"neg_{val_col}")
-          for val_col in VALOR_COLUMNS if f"flag_{val_col}_negativo" in df_silver_written.columns],
+          for val_col in VALOR_COLUMNS if f"flag_{val_col}_negativo" in df_silver.columns],
         *[F.sum(F.when(F.col(f"flag_{cod_col}_sentinela") == 1, 1).otherwise(0)).alias(f"sent_{cod_col}")
-          for cod_col in CODIGO_COLUMNS if f"flag_{cod_col}_sentinela" in df_silver_written.columns],
+          for cod_col in CODIGO_COLUMNS if f"flag_{cod_col}_sentinela" in df_silver.columns],
         F.sum(F.when(F.col("flag_sos") == 1, 1).otherwise(0)).alias("sos_presente"),
         F.sum(F.when(F.col("flag_instalacao_int").isNull(), 1).otherwise(0)).alias("flag_null"),
         F.sum(F.when(F.col("flag_instalacao_int") == 0, 1).otherwise(0)).alias("flag_0"),
         F.sum(F.when(F.col("flag_instalacao_int") == 1, 1).otherwise(0)).alias("flag_1")
     ).collect()[0]
 
-    count_out = quality_metrics["total"]
+    # Liberar cache apos quality checks
+    df_silver.unpersist()
+
+    count_out_quality = quality_metrics["total"]
 
     ts_invalida = quality_metrics["ts_invalida"]
-    ts_valida = count_out - ts_invalida
-    ts_coverage = 100 * ts_valida / count_out if count_out > 0 else 0
+    ts_valida = count_out_quality - ts_invalida
+    ts_coverage = 100 * ts_valida / count_out_quality if count_out_quality > 0 else 0
     print(f"\n>>> [Quality] Parsing de data:")
     print(f"    TS_RECARGA valida:   {ts_valida:>12} ({ts_coverage:.2f}%)")
     print(f"    TS_RECARGA invalida: {ts_invalida:>12}")
 
     print(f"\n>>> [Quality] Valores negativos:")
     for val_col in VALOR_COLUMNS:
-        if f"flag_{val_col}_negativo" in df_silver_written.columns:
+        if f"flag_{val_col}_negativo" in df_silver.columns:
             neg_count = quality_metrics[f"neg_{val_col}"]
-            print(f"    {val_col}_negativo: {neg_count:>12} ({100*neg_count/count_out:.2f}%)")
+            print(f"    {val_col}_negativo: {neg_count:>12} ({100*neg_count/count_out_quality:.2f}%)")
 
     print(f"\n>>> [Quality] Sentinelas em codigos dimensionais (-1/-2/-3):")
     for cod_col in CODIGO_COLUMNS:
-        if f"flag_{cod_col}_sentinela" in df_silver_written.columns:
+        if f"flag_{cod_col}_sentinela" in df_silver.columns:
             sent_count = quality_metrics[f"sent_{cod_col}"]
-            print(f"    {cod_col}_sentinela: {sent_count:>12} ({100*sent_count/count_out:.2f}%)")
+            print(f"    {cod_col}_sentinela: {sent_count:>12} ({100*sent_count/count_out_quality:.2f}%)")
 
     sos_presente = quality_metrics["sos_presente"]
     print(f"\n>>> [Quality] SOS:")
-    print(f"    Eventos com SOS: {sos_presente:>12} ({100*sos_presente/count_out:.2f}%)")
+    print(f"    Eventos com SOS: {sos_presente:>12} ({100*sos_presente/count_out_quality:.2f}%)")
 
     flag_null = quality_metrics["flag_null"]
     flag_0    = quality_metrics["flag_0"]
     flag_1    = quality_metrics["flag_1"]
     print(f"\n>>> [Quality] FLAG_INSTALACAO:")
     print(f"    Nulo:   {flag_null:>12}")
-    print(f"    FLAG=0: {flag_0:>12} ({100*flag_0/count_out:.2f}%)")
-    print(f"    FLAG=1: {flag_1:>12} ({100*flag_1/count_out:.2f}%)")
+    print(f"    FLAG=0: {flag_0:>12} ({100*flag_0/count_out_quality:.2f}%)")
+    print(f"    FLAG=1: {flag_1:>12} ({100*flag_1/count_out_quality:.2f}%)")
 
     print("\n" + "="*80)
-    print(f"Silver RECARGA concluido — sem cache, coalesce dinamico, quality na Silver escrita")
-    print(f"  - Registros:          {count_out}")
-    print(f"  - Arquivos de saida:  {num_output_files} (~{TARGET_FILE_SIZE_MB}MB cada, calculado em runtime)")
-    print(f"  - Actions:            3 (count pre-write + write Bronze→Silver + agg Silver escrita)")
-    print(f"  - Cache:              nao (sem pressao de memoria)")
+    print(f"Silver RECARGA concluido — V4 (cache + coalesce dinamico)")
+    print(f"  - Registros entrada:  {count_in}")
+    print(f"  - Registros saida:    {count_out}")
+    print(f"  - Arquivos de saida:  {num_output_files} (~{TARGET_FILE_SIZE_MB}MB cada)")
+    print(f"  - Actions:            3 (count materializa cache + write + agg)")
+    print(f"  - Cache:              sim (~15-20GB JVM heap)")
     print(f"  - Dedupe:             removida (Gold groupBy absorve 0.3%)")
-    print(f"  - I/O OCI:            ~4GB (Bronze count) + ~4GB (Bronze write) + ~3GB (Silver quality)")
-    print(f"  - Coalesce:           dinamico ({num_output_files} arquivos calculados em runtime)")
+    print(f"  - I/O OCI:            ~4GB (Bronze) + cache scans internos")
+    print(f"  - Performance medida: 18m25s, 36GB lidos (18/02/2026)")
     print("="*80 + "\n")
 
 if __name__ == "__main__":

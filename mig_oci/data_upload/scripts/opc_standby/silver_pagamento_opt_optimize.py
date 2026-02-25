@@ -1,28 +1,31 @@
-# Arquivo: scripts/opc_standby/silver_pagamento_opt_z.py
-# OPCAO Z: sem cache, quality na Silver JA ESCRITA + Coalesce DINAMICO
-# Padrão vencedor de recarga aplicado ao pagamento.
+# Arquivo: scripts/opc_standby/silver_pagamento_opt_optimize.py
+# OPCAO OPTIMIZE: opt_z + Delta OPTIMIZE apos escrita
+# Elimina necessidade de calibrar BYTES_PER_ROW_ESTIMATE manualmente.
 """
 --------------------------------------------------------------------------------
 PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
-SCRIPT: silver_pagamento_opt_z.py — OPCAO Z (sem cache + coalesce dinamico)
-OBJETIVO: Bronze -> Silver Pagamento sem cache, quality sobre arquivo escrito,
-          com numero de arquivos de saida calculado dinamicamente.
+SCRIPT: silver_pagamento_opt_optimize.py — OPCAO OPTIMIZE
+OBJETIVO: Bronze -> Silver Pagamento com Delta OPTIMIZE pos-escrita.
 --------------------------------------------------------------------------------
-ARQUITETURA (3 actions):
-  action 1: count() pre-write   → calcula num_output_files (inclui shuffle dedup)
-  action 2: coalesce(N).write() → grava Silver (re-executa shuffle dedup)
+ARQUITETURA (3 actions + OPTIMIZE):
+  action 1: count() pre-write   → calcula num_output_files (bucket inicial)
+  action 2: coalesce(N).write() → grava Silver
   action 3: agg(Silver escrita) → quality check no arquivo real
+  OPTIMIZE → Delta reorganiza fisicamente os arquivos para ~128MB cada
 
-CALIBRACAO DO BYTES_PER_ROW_ESTIMATE:
-  Valor atual: 4 bytes/registro (calibrado com base no 1o run: ~33,5M reg / ~120MB)
-  Formula: BYTES_PER_ROW_ESTIMATE = tamanho_total_MB * 1024 * 1024 / count_registros
-  Ajustar se o schema mudar ou a taxa de compressao variar.
+VANTAGEM VS OPT-Z:
+  + OPTIMIZE garante arquivos de ~128MB independente do BYTES_PER_ROW_ESTIMATE
+  + Sem necessidade de calibrar manualmente apos mudancas de schema ou volume
+  + Bin-packing do Delta e mais preciso que a estimativa de bytes/registro
 
-DIFERENCA VS ORIGINAL (silver_pagamento.py):
-  - 3 actions em vez de 7 (count_bronze + count_silver + 4 gates + write)
-  - Coalesce dinamico: arquivos de ~128MB em vez de tamanho imprevisivel
-  - Quality consolidado em unico agg() na Silver escrita
-  - to_double_safe sem regex (cast direto)
+DESVANTAGEM VS OPT-Z:
+  - 1 operacao extra (OPTIMIZE varre e reescreve os arquivos)
+  - Gera arquivos antigos que precisam de VACUUM para limpeza
+  - Tempo adicional proporcional ao tamanho da Silver
+
+QUANDO USAR:
+  Quando o schema muda frequentemente ou o volume e imprevisivel entre runs.
+  Para volumes estaveis, opt_z com BYTES_PER_ROW calibrado e mais eficiente.
 --------------------------------------------------------------------------------
 """
 
@@ -31,6 +34,7 @@ import argparse
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
+from delta.tables import DeltaTable
 
 # =============================================================================
 # UTILITY FUNCTIONS (inlined from spark_utils.py para OCI Data Flow)
@@ -66,12 +70,18 @@ DEFAULT_OUTPUT_PATH = f"oci://hackathon-2025-silver-layer@{namespace}/pagamento/
 DEFAULT_FORMAT = "delta"
 SILVER_VERSION = "silver_pagamento_v1"
 
-# Bytes estimados por registro na Silver (para coalesce dinamico)
-# Calibrado com base no 2o run: ~30M registros → ~2.343MB Delta = ~85 bytes/reg
-# (run anterior com BYTES=4 gerou coalesce(1) → arquivo de 2.29 GiB — muito grande)
-# Formula: BYTES = tamanho_total_MB * 1024 * 1024 / count_registros
-BYTES_PER_ROW_ESTIMATE = 65
+# Tamanho alvo por arquivo apos OPTIMIZE (bin-packing)
+# Configurado via spark.databricks.delta.targetFileSize no runtime
 TARGET_FILE_SIZE_MB = 128
+
+# Coalesce inicial: numero generoso de particoes antes do OPTIMIZE
+# O OPTIMIZE vai consolidar para ~TARGET_FILE_SIZE_MB independente deste valor
+# Usar spark.sql.shuffle.partitions como referencia (default 200 → reduzir)
+INITIAL_COALESCE = 20
+
+# VACUUM: remover arquivos pre-OPTIMIZE mais antigos que N horas
+# 0 = remover imediatamente (sem time travel). Aumentar se precisar de rollback.
+VACUUM_RETENTION_HOURS = 0
 # =============================================================================
 
 def build_silver_pagamento(df_bronze):
@@ -144,7 +154,7 @@ def build_silver_pagamento(df_bronze):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ETL Bronze to Silver Pagamento - Opt-Z")
+    parser = argparse.ArgumentParser(description="ETL Bronze to Silver Pagamento - Opt-Optimize")
     parser.add_argument("--input_path", help="Caminho do Bronze Pagamento")
     parser.add_argument("--output_path", help="Caminho de destino Silver Pagamento")
     parser.add_argument("--format", default=DEFAULT_FORMAT)
@@ -161,7 +171,16 @@ def main():
             format = DEFAULT_FORMAT
         args = Args()
 
-    spark = SparkSession.builder.appName("Silver_Pagamento_OptZ").getOrCreate()
+    spark = SparkSession.builder.appName("Silver_Pagamento_Optimize").getOrCreate()
+
+    # Necessario para VACUUM com retencao 0h
+    if VACUUM_RETENTION_HOURS == 0:
+        spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+
+    # Alvo de bin-packing do OPTIMIZE: 128MB por arquivo
+    # Default Delta open-source = 1GB (diferente do Databricks gerenciado)
+    # Sem isso, executeCompaction() gera arquivos de ~1GB em vez de ~128MB
+    spark.conf.set("spark.databricks.delta.targetFileSize", str(TARGET_FILE_SIZE_MB * 1024 * 1024))
 
     # =========================================================================
     # 1) LEITURA BRONZE
@@ -179,24 +198,13 @@ def main():
     df_silver = build_silver_pagamento(df_bronze)
 
     # =========================================================================
-    # 3) COALESCE DINAMICO — ACTION 1
-    # Inclui o shuffle do Window (dedup por versionamento).
-    # =========================================================================
-    print(">>> [Coalesce] Contando registros pos-dedup para calcular coalesce dinamico...")
-    count_pre = df_silver.count()
-    print(f">>> [Info] Registros Silver (pos-dedup): {count_pre:,}")
-
-    estimated_size_mb = count_pre * BYTES_PER_ROW_ESTIMATE / (1024 * 1024)
-    num_output_files = max(1, int(estimated_size_mb / TARGET_FILE_SIZE_MB))
-    print(f">>> [Info] Coalesce dinamico: {num_output_files} arquivos (~{TARGET_FILE_SIZE_MB}MB cada)")
-    print(f">>> [Info] Tamanho estimado total: {estimated_size_mb:.0f} MB")
-
-    # =========================================================================
-    # 4) ESCRITA SILVER — ACTION 2
+    # 3) ESCRITA SILVER — ACTION 1
+    # Coalesce inicial generoso: o OPTIMIZE vai reorganizar depois.
     # =========================================================================
     print(f">>> [Escrita] Salvando Silver Pagamento (Delta): {args.output_path}")
+    print(f">>> [Info] Coalesce inicial: {INITIAL_COALESCE} particoes (sera otimizado pelo OPTIMIZE)")
 
-    df_silver.coalesce(num_output_files) \
+    df_silver.coalesce(INITIAL_COALESCE) \
         .write \
         .format("delta") \
         .mode("overwrite") \
@@ -207,9 +215,24 @@ def main():
     print(">>> [Escrita] Silver gravada com sucesso.")
 
     # =========================================================================
-    # 5) QUALITY CHECKS na Silver JA ESCRITA — ACTION 3
+    # 4) DELTA OPTIMIZE (bin-packing para ~128MB por arquivo)
+    # Reorganiza fisicamente os arquivos para o tamanho ideal.
+    # Mais preciso que coalesce porque opera sobre o dado ja comprimido.
     # =========================================================================
-    print(f"\n>>> [Quality] Lendo Silver gravada para validacao: {args.output_path}")
+    print(f"\n>>> [Optimize] Executando Delta OPTIMIZE em: {args.output_path}")
+    dt = DeltaTable.forPath(spark, args.output_path)
+    dt.optimize().executeCompaction()
+    print(">>> [Optimize] Compactacao concluida.")
+
+    # VACUUM: remover arquivos pre-OPTIMIZE
+    print(f">>> [Vacuum] Removendo arquivos antigos (retencao: {VACUUM_RETENTION_HOURS}h)...")
+    dt.vacuum(VACUUM_RETENTION_HOURS)
+    print(">>> [Vacuum] Limpeza concluida.")
+
+    # =========================================================================
+    # 5) QUALITY CHECKS na Silver pos-OPTIMIZE — ACTION 2
+    # =========================================================================
+    print(f"\n>>> [Quality] Lendo Silver pos-OPTIMIZE para validacao: {args.output_path}")
     df_written = spark.read.format("delta").load(args.output_path)
 
     quality = df_written.agg(
@@ -227,7 +250,7 @@ def main():
     missing_pag  = quality["missing_pag"]
 
     print("\n" + "="*80)
-    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER PAGAMENTO (OPT-Z)")
+    print(">>> [Quality] RELATORIO DE QUALIDADE - SILVER PAGAMENTO (OPT-OPTIMIZE)")
     print("="*80)
     print(f"\n    Registros Silver (pos-dedup):        {count_out:>12,}")
     print(f"\n    Gate 1 - TS_STATUS_FATURA invalidos: {invalidos_ts:>12,}")
@@ -236,11 +259,12 @@ def main():
     print(f"    Gate 4 - DAT_STATUS_PAG missing:     {missing_pag:>12,} ({100*missing_pag/count_out:.2f}%) [esperado ~28%]")
 
     print("\n" + "="*80)
-    print("Silver PAGAMENTO concluido — opt_z (sem cache, coalesce dinamico)")
+    print("Silver PAGAMENTO concluido — opt_optimize (sem cache + OPTIMIZE)")
     print(f"  - Registros:          {count_out:,}")
-    print(f"  - Arquivos de saida:  {num_output_files} (~{TARGET_FILE_SIZE_MB}MB cada)")
-    print(f"  - Actions:            3 (count + write + agg Silver escrita)")
-    print(f"  - BYTES_PER_ROW:      {BYTES_PER_ROW_ESTIMATE} (calibrado: ~30M reg / ~2.343MB)")
+    print(f"  - Arquivos de saida:  ~128MB cada (garantido pelo OPTIMIZE)")
+    print(f"  - Actions:            2 (write + agg pos-OPTIMIZE)")
+    print(f"  - OPTIMIZE:           sim (bin-packing Delta)")
+    print(f"  - VACUUM:             sim ({VACUUM_RETENTION_HOURS}h retencao)")
     print(f"  - Proximo passo:      gold_pagamento.py")
     print("="*80 + "\n")
 
