@@ -12,8 +12,13 @@ output "namespace" {
 }
 
 output "bucket_landing_zone" {
-  description = "Nome do bucket landing-zone (dados brutos + scripts)"
+  description = "Nome do bucket landing-zone (apenas dados brutos — source/)"
   value       = oci_objectstorage_bucket.landing_zone.name
+}
+
+output "bucket_pipeline_ops" {
+  description = "Nome do bucket pipeline-ops (scripts/, libs/, logs/)"
+  value       = oci_objectstorage_bucket.pipeline_ops.name
 }
 
 output "bucket_bronze_layer" {

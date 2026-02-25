@@ -64,6 +64,18 @@ output "storage_info" {
 }
 
 
+# --- Fase 5: Airflow VM ---
+
+output "airflow_info" {
+  description = "Informações da VM do Airflow"
+  value = {
+    vm_id      = module.airflow.airflow_vm_id
+    public_ip  = module.airflow.airflow_public_ip
+    ui_url     = module.airflow.airflow_ui_url
+  }
+}
+
+
 # --- Fase 4: Compute ---
 
 output "dataflow_applications" {

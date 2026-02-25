@@ -1,0 +1,28 @@
+{
+  "oci_compute_compartment_id": "ocid1.compartment.oc1..aaaaaaaa6x6a7nrzue3dinrpoqlz5ah2duwob67vq363txu4gdej5cb3mu7q",
+
+  "oci_app_id_bronze_bureau":    "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqawpilvgplexq225kyxqhlsj2epljgrc7iiqnbjd5lbczq",
+  "oci_app_id_bronze_telco":     "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqac7c4c6kkofhxkxqcmakethi4ypa5y7tuk2xv6iwutueq",
+  "oci_app_id_bronze_cadastro":  "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqadud4juireacgzx7mdqs33msnisxcxuqeyw2vngbgi4na",
+  "oci_app_id_bronze_recarga":   "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqa2kva7fxo2ngbtqbjvvx5pzigyioktehlyjurhsuvs67a",
+  "oci_app_id_bronze_pagamento": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqaer42m5ttmnkstay26a5coamxlbngfwwaixtcsooxcgfa",
+  "oci_app_id_bronze_atraso":    "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqanqnhylndiwrgbtafa5jawxrt3ykkvd6wcloux4loygta",
+
+  "oci_app_id_silver_bureau":    "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqaxrjvfmdh3e5ntts4uiqvo4fo3nqa73ji7bi2rku2i3ea",
+  "oci_app_id_silver_telco":     "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqafkmcio2lbtfmndwxb6wlotufr556fs5ynu7sugkhdsuq",
+  "oci_app_id_silver_cadastro":  "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqa4qg5wqognjmvtkwap2lfkhc22lukhmk6zhtfidntodba",
+  "oci_app_id_silver_recarga":   "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqanysqpxfds6me3tnb7oo5gj6slugsk767g4wz5dhqikma",
+  "oci_app_id_silver_pagamento": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqafhabx7tl5qkm4yd3fapkgrbsukr6mmsygvf2jb45hkxa",
+  "oci_app_id_silver_atraso":    "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqauh5tx4exsixpld6d2mgmwh5z42nbufmwzoaf56jsncjq",
+
+  "oci_app_id_gold_recarga":   "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqajjzh2qpeyarty5mm7lhbkuqnw3ciedh4ywo74wu54nsa",
+  "oci_app_id_gold_pagamento": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqavzqu6oicfi3gy3hq457wydjhdxnuxmplexmr3yt47f6a",
+  "oci_app_id_gold_atraso":    "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqa7lj5imbikebf2nhwji6jdertgjgsfnazmvauarq36kfq",
+
+  "oci_app_id_abt_v1": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqarglhll5lwc3mub5sc53hgyq7kg54hnlk5n2wnsbjqrma",
+  "oci_app_id_abt_v2": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqazi4cwwsbhda5vegc5zuuczx6hsbht4zd2yms2pooyfga",
+  "oci_app_id_abt_v3": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqau76hdf7bseclpgiqdy5kcxvt7uawslvc5w3nqa5aazca",
+  "oci_app_id_abt_v4": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqanj4tprtib2ys6wth73pvfhbngla64aodsdvytz65tlia",
+  "oci_app_id_abt_v5": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqawbazjclppngyb4x65ohpglfx3xd7uxcnsjn4ipiylgxq",
+  "oci_app_id_abt_v6": "ocid1.dataflowapplication.oc1.sa-saopaulo-1.antxeljrjawikrqapvja3mgqpxf23uhq5eitoodvvid4z7raqzqt2qr2xqgq"
+}

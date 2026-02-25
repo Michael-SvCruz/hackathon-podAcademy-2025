@@ -53,6 +53,24 @@ module "storage" {
 
 
 # ============================================
+# FASE 5: Airflow VM (Astro CLI self-hosted)
+# ============================================
+module "airflow" {
+  source = "../../modules/airflow"
+
+  compartment_id   = module.iam.compute_compartment_id
+  public_subnet_id = module.network.public_subnet_id
+  vcn_id           = module.network.vcn_id
+  ssh_public_key   = var.airflow_ssh_public_key
+  project_name     = var.project_name
+  shape            = "VM.Standard.E3.Flex"
+  ocpus            = 1
+  memory_in_gbs    = 16
+  tags                = var.tags
+}
+
+
+# ============================================
 # FASE 4: Compute (Data Flow Applications)
 # ============================================
 module "compute" {
@@ -60,7 +78,7 @@ module "compute" {
 
   compute_compartment_id = module.iam.compute_compartment_id
   namespace              = module.storage.namespace
-  bucket_landing_zone    = module.storage.bucket_landing_zone
+  bucket_pipeline_ops    = module.storage.bucket_pipeline_ops
   dataflow_applications  = var.dataflow_applications
   project_name           = var.project_name
   spark_version          = "3.5.0"

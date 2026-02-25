@@ -196,6 +196,17 @@ resource "oci_core_security_list" "public" {
     }
   }
 
+  # Airflow UI (porta 8080)
+  ingress_security_rules {
+    source    = "0.0.0.0/0"
+    protocol  = "6"
+    stateless = false
+    tcp_options {
+      min = 8080
+      max = 8080
+    }
+  }
+
   freeform_tags = var.tags
 }
 

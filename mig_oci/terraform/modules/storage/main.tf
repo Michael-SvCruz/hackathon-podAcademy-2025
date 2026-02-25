@@ -43,13 +43,39 @@ data "oci_objectstorage_namespace" "current" {
 # ============================================
 # 2. BUCKETS - Medallion Architecture
 # ============================================
+# Estrutura final:
+#
+# landing-zone  → source/ (dados brutos)
+# bronze-layer  → dados com metadados (schema-on-read)
+# silver-layer  → dados tipados e validados
+# gold-layer    → ABT v1-v6 (feature tables + ABT final)
+# models        → artefatos do modelo LightGBM
+# tfstate       → state remoto Terraform
+# pipeline-ops  → scripts/ + libs/ + logs/ (infraestrutura do pipeline)
 
-# Landing Zone - Dados brutos + scripts Python
-# Primeiro ponto de entrada: dados CSV/Parquet vindos do Databricks
+# Landing Zone - Apenas dados brutos (source)
+# Primeiro ponto de entrada: dados CSV/Parquet vindos do Databricks.
+# Scripts, libs e logs ficam no bucket pipeline-ops (separacao de responsabilidades).
 resource "oci_objectstorage_bucket" "landing_zone" {
   compartment_id = var.storage_compartment_id
   namespace      = data.oci_objectstorage_namespace.current.namespace
   name           = "${var.project_name}-landing-zone"
+  access_type    = "NoPublicAccess"
+  versioning     = "Enabled"
+
+  freeform_tags = var.tags
+}
+
+# Pipeline Ops - Scripts PySpark, libs (utils.zip) e logs do Data Flow
+# Separado da landing-zone para nao misturar dados de negocio com infraestrutura.
+# Estrutura interna:
+#   scripts/   <- 21 scripts PySpark (file_uri das Data Flow Applications)
+#   libs/      <- utils.zip (dependencias Python)
+#   logs/      <- logs de execucao dos jobs Data Flow (logs_bucket_uri)
+resource "oci_objectstorage_bucket" "pipeline_ops" {
+  compartment_id = var.storage_compartment_id
+  namespace      = data.oci_objectstorage_namespace.current.namespace
+  name           = "${var.project_name}-pipeline-ops"
   access_type    = "NoPublicAccess"
   versioning     = "Enabled"
 

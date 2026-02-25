@@ -25,17 +25,15 @@ terraform {
 # Cada application é uma "definição de job" - as execuções são disparadas
 # via API, CLI ou Airflow (oci_dataflow_run).
 #
-# Shape VM.Standard.E4.Flex permite configurar OCPUs e memória por etapa:
-# - Bronze: leve (2 OCPU, 4 executors) - apenas ingestão
-# - Silver: médio (4 OCPU, 8 executors) - validação + tipagem
-# - Gold:   pesado (4 OCPU, 16 executors) - feature engineering
-# - ABT:    médio (4 OCPU, 8 executors) - joins + builder final
+# Shape VM.Standard2.1 (driver: 1 OCPU/15GB) + VM.Standard2.2 (executor: 2 OCPU/30GB)
+# Autoscaling habilitado: Data Flow ajusta executors entre min/max conforme carga.
+# Configuração padronizada para todas as 21 apps (limitação de quota OCI free tier).
 
 
 # ============================================
 # Data Flow Applications (for_each)
 # ============================================
-# Uma única definição de recurso cria todas as 17 aplicações
+# Uma única definição de recurso cria todas as 21 aplicações
 # com base no mapa var.dataflow_applications.
 
 resource "oci_dataflow_application" "apps" {
@@ -46,32 +44,38 @@ resource "oci_dataflow_application" "apps" {
   type           = "BATCH"
   spark_version  = var.spark_version
 
-  driver_shape = "VM.Standard.E4.Flex"
-  driver_shape_config {
-    ocpus         = each.value.ocpu
-    memory_in_gbs = each.value.ocpu * 16
-  }
+  # Driver: VM.Standard2.1 (1 OCPU, 15 GB RAM) — shape fixo
+  driver_shape = var.driver_shape
 
-  executor_shape = "VM.Standard.E4.Flex"
-  executor_shape_config {
-    ocpus         = each.value.ocpu
-    memory_in_gbs = each.value.ocpu * 16
-  }
+  # Executor: VM.Standard2.2 (2 OCPU, 30 GB RAM) — shape fixo
+  # num_executors define o valor inicial; autoscaling ajusta entre min/max via Spark Dynamic Allocation
+  executor_shape = var.executor_shape
+  num_executors  = var.min_executors
 
-  num_executors = each.value.num_executors
+  file_uri = "oci://${var.bucket_pipeline_ops}@${var.namespace}/scripts/${each.value.script_name}"
 
-  file_uri = "oci://${var.bucket_landing_zone}@${var.namespace}/scripts/${each.value.script_name}"
+  # Scripts self-contained: sem archive_uri, sem addPyFile.
+  # Funcoes utilitarias inline em cada script (evita race condition com Resource Principal).
 
-  # Dependências Python carregadas via addPyFile() nos scripts (não archive_uri)
-  # archive_uri exige conda pack - desnecessário para 2 arquivos .py utilitários
+  # Logs e warehouse no bucket pipeline-ops (separado da landing-zone de dados brutos)
+  logs_bucket_uri      = "oci://${var.bucket_pipeline_ops}@${var.namespace}/logs/"
+  warehouse_bucket_uri = "oci://${var.bucket_pipeline_ops}@${var.namespace}/warehouse/"
 
-  # Logs e warehouse no bucket landing-zone (evita criar bucket dataflow-logs separado)
-  logs_bucket_uri      = "oci://${var.bucket_landing_zone}@${var.namespace}/dataflow-logs/"
-  warehouse_bucket_uri = "oci://${var.bucket_landing_zone}@${var.namespace}/dataflow-warehouse/"
-
+  # Delta Lake + Autoscaling (Spark Dynamic Allocation)
+  # Ref: https://docs.oracle.com/en-us/iaas/data-flow/using/autoscaling.htm
   configuration = {
+    # Delta Lake
     "spark.sql.extensions"            = "io.delta.sql.DeltaSparkSessionExtension"
     "spark.sql.catalog.spark_catalog" = "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+
+    # Autoscaling via Spark Dynamic Allocation
+    "spark.dynamicAllocation.enabled"                 = "true"
+    "spark.dynamicAllocation.shuffleTracking.enabled"  = "true"
+    "spark.dynamicAllocation.minExecutors"             = tostring(var.min_executors)
+    "spark.dynamicAllocation.maxExecutors"             = tostring(var.max_executors)
+    "spark.dynamicAllocation.executorIdleTimeout"      = "60"
+    "spark.dynamicAllocation.schedulerBacklogTimeout"  = "60"
+    "spark.dataflow.dynamicAllocation.quotaPolicy"     = "min"
   }
 
   arguments = [var.namespace]
