@@ -1,0 +1,8 @@
+# Dependências Python para o ambiente Airflow do pipeline FPD
+# Instalar: pip install -r requirements.txt
+
+# OCI SDK — autenticação (Instance Principal) + Data Flow API
+oci>=2.126.0
+
+# Apache Airflow — core (instalar via gerenciador de pacotes do Airflow, não pip direto)
+# apache-airflow>=2.8.0

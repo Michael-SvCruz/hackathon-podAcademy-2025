@@ -1,0 +1,123 @@
+# ============================================================
+# Docker Compose — Airflow (LocalExecutor)
+# ============================================================
+# Setup simplificado para o hackathon:
+#   - LocalExecutor: sem Redis/Celery, roda tasks em paralelo
+#     na mesma VM (suficiente para pipeline batch mensal)
+#   - Apenas 3 serviços: postgres, webserver, scheduler
+#   - OCI SDK instalado para autenticar via Instance Principal
+#     (quando rodando em VM OCI) ou via ~/.oci/config (local)
+#
+# Deploy na VM OCI:
+#   scp docker-compose.yml opc@<VM_IP>:/opt/airflow-fpd/
+#   docker compose run --rm airflow-init
+#   docker compose up -d
+#   docker compose exec airflow-scheduler airflow variables import \
+#     /opt/airflow/config/airflow_variables_filled.json
+#
+# AIRFLOW_PROJ_DIR: diretório raiz do projeto (default: diretório atual)
+#   Na VM: executar de /opt/airflow-fpd/ (com dags/, config/, plugins/, logs/)
+#
+# Acesso UI: http://<VM_IP>:8080 (user: airflow, senha: airflow)
+# ============================================================
+
+version: '3.8'
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.8.0-python3.10
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'hackathon-2025-fpd'
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: '60'
+    # Instalar OCI SDK no container
+    _PIP_ADDITIONAL_REQUIREMENTS: 'oci>=2.126.0'
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags           # DAGs do pipeline
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins     # Plugins customizados
+    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config       # Variables JSON
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs           # Logs persistidos
+    - ~/.oci:/opt/airflow/.oci:ro                             # Credenciais OCI (dev local)
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # ----------------------------------------------------------
+  # Banco de dados do Airflow
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Interface Web (http://<IP>:8080)
+  # ----------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Scheduler (dispara tasks no horário configurado)
+  # ----------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Init: cria usuário admin + inicializa o banco
+  # Roda uma vez e termina (condition: service_completed_successfully)
+  # ----------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username airflow \
+          --firstname Airflow \
+          --lastname Admin \
+          --role Admin \
+          --email admin@hackathon.local \
+          --password airflow
+        echo "Airflow inicializado com sucesso."
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+    user: "0:0"
+
+volumes:
+  postgres-db:
