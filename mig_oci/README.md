@@ -9,11 +9,11 @@ Migração do projeto de Databricks para Oracle Cloud Infrastructure (OCI) usand
 | **Fase 0** | ✅ Concluída | Setup: Provider OCI v5.47.0, backend local, credenciais validadas |
 | **Fase 1** | ✅ Aplicada | IAM: 6 compartments, 4 grupos, políticas de acesso |
 | **Fase 2** | ✅ Aplicada | Network: VCN, 3 subnets, 3 gateways, 2 route tables, 2 security lists |
-| **Fase 3** | ✅ Aplicada | Storage: 6 buckets (landing-zone, bronze, silver, gold, models, tfstate) |
-| **Fase 4** | ✅ Aplicada | Compute: 21 Data Flow Applications (for_each dinâmico) |
+| **Fase 3** | ✅ Re-aplicada | Storage: 7 buckets — `pipeline-ops` criado (scripts/libs/logs separados da landing-zone) |
+| **Fase 4** | ✅ Re-aplicada | Compute: 21 Data Flow Applications com `file_uri`, logs e warehouse → `pipeline-ops` |
 | **Fase 5** | ⏳ Opcional | Security: Vault + Master Key |
 | **Fase 6A** | ✅ Concluída | Landing → Bronze: 6 scripts adaptados, testados e executados no Data Flow |
-| **Fase 6B** | ⏳ Em andamento | Silver → Gold → ABT: scripts prontos, falta executar no Data Flow |
+| **Fase 6B** | ⏳ Em andamento | Silver: todos os 6 scripts com padrão opt_z (principal) + opt_optimize (standby). Gold/ABT aguardando |
 
 ---
 
@@ -39,8 +39,10 @@ cd mig_oci/terraform/scripts
 
 ```bash
 cd mig_oci/data_upload
-./upload_scripts.sh    # Envia 21 scripts + utils.zip para o bucket landing-zone
+./upload_scripts.sh    # Envia 21 scripts + utils.zip para o bucket pipeline-ops
 ```
+
+> **Nota:** Executar `./apply_phase.sh 3` antes para criar o bucket `pipeline-ops`.
 
 ---
 
@@ -64,13 +66,16 @@ mig_oci/
 │       ├── init.sh              # Inicializar + validar credenciais
 │       └── apply_phase.sh       # Aplicar fase específica (1-5)
 ├── data_upload/
-│   ├── scripts/                 # 21 scripts PySpark adaptados para OCI Data Flow
+│   ├── scripts/                 # 21 scripts PySpark (versão principal — padrão opt_z)
 │   │   ├── bronze_*.py          # 6 scripts Bronze (Landing → Bronze)
-│   │   ├── silver_*.py          # 6 scripts Silver (Bronze → Silver)
+│   │   ├── silver_*.py          # 6 scripts Silver opt_z (sem cache, coalesce dinâmico)
 │   │   ├── gold_*.py            # 3 scripts Gold (Silver → Gold features)
 │   │   ├── abt_*.py             # 6 scripts ABT (Gold → ABT v1-v6)
-│   │   └── opc_standby/         # Versões alternativas / benchmarks
-│   └── upload_scripts.sh        # Upload scripts para Object Storage
+│   │   └── opc_standby/         # Versões alternativas por script:
+│   │       ├── silver_*_original.py     # Versão pré-otimização (referência)
+│   │       ├── silver_*_opt_z.py        # Cópia da versão promovida
+│   │       └── silver_*_opt_optimize.py # Alternativa com Delta OPTIMIZE + VACUUM
+│   └── upload_scripts.sh        # Upload scripts para bucket pipeline-ops
 ├── airflow/                     # Orquestração (configurar após Terraform)
 └── docs/
     ├── FASE_0_1_IMPLEMENTACAO.md       # Setup, IAM, conceitos OCI
@@ -97,7 +102,7 @@ Landing Zone (OCI Object Storage)
            │
     ├── silver_bureau.py    ─┐
     ├── silver_telco.py      │
-    ├── silver_cadastro.py   ├─ Silver Layer (6 apps) ⏳ silver_recarga testado
+    ├── silver_cadastro.py   ├─ Silver Layer (6 apps) ⏳ recarga ✅ testado; demais prontos (opt_z)
     ├── silver_recarga.py    │
     ├── silver_pagamento.py  │
     └── silver_atraso.py    ─┘
@@ -142,7 +147,7 @@ Landing Zone (OCI Object Storage)
 | Ferramenta | O que faz | Quando |
 |------------|-----------|--------|
 | **Terraform** | Cria infraestrutura OCI (compartments, VCN, buckets, Data Flow apps) | Fases 0-5 |
-| **upload_scripts.sh** | Envia scripts Python para o bucket landing-zone | Antes de cada deploy |
+| **upload_scripts.sh** | Envia scripts Python para o bucket **pipeline-ops** | Antes de cada deploy |
 | **OCI Data Flow** | Executa jobs Spark gerenciados (Bronze/Silver/Gold/ABT) | Fase 6 |
 | **Airflow** | Orquestra execução dos Data Flow jobs em sequência | Após Terraform |
 | **Console OCI** | Testes manuais, monitoramento de runs, gestão de usuários | Durante toda migração |
@@ -160,6 +165,9 @@ Landing Zone (OCI Object Storage)
 | `KryoSerializer` quebra autenticação OCI | Incompatível com `X509FederationClient` — não usar no Data Flow |
 | `logs_bucket_uri` obrigatório | Sem ele, Data Flow procura bucket `dataflow-logs` inexistente |
 | Erro X509 pode indicar dados ausentes | Verificar se os dados existem no bucket antes de debugar auth |
+| `executeCompaction()` gera arquivos de ~1GB | Default Delta open-source é 1GB — setar `spark.databricks.delta.targetFileSize` para 128MB antes do OPTIMIZE |
+| Delta `mode("overwrite")` acumula ghost files | Executar `VACUUM` após cada overwrite para limpar arquivos antigos |
+| Silver opt_z — arquivo muito grande (coalesce=1) | `BYTES_PER_ROW_ESTIMATE` muito baixo — calibrar com `BYTES = tamanho_MB * 1024*1024 / count` |
 
 > Documentação detalhada: `docs/FASE_6A_TROUBLESHOOTING.md`
 
@@ -190,6 +198,7 @@ Landing Zone (OCI Object Storage)
 | `docs/FASE_6A_TROUBLESHOOTING.md` | Problemas encontrados e soluções definitivas |
 | `docs/IAM_USUARIOS_EQUIPE.md` | Grupos, acessos, integrantes e matriz de permissões |
 | `data_upload/scripts/opc_standby/COMPARATIVO_VERSOES_SILVER_RECARGA.md` | Benchmark das versões do silver_recarga (vencedor: opt_z, 9m44s) |
+| `docs/IAM_USUARIOS_EQUIPE.md` | Grupos, acessos, integrantes e matriz de permissões da equipe |
 
 ---
 
