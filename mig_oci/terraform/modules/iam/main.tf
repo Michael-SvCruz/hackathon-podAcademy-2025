@@ -246,6 +246,9 @@ resource "oci_identity_policy" "dataflow_service" {
 
     # Data Flow precisa acessar a rede (subnets)
     "Allow service dataflow to use virtual-network-family in compartment ${var.project_name}",
+
+    # Data Science precisa acessar a rede (subnets) para criar notebooks
+    "Allow service datascience to use virtual-network-family in compartment ${var.project_name}",
   ]
 }
 
@@ -283,5 +286,82 @@ resource "oci_identity_policy" "developers_read_prod" {
 
     # Inspecionar rede (necessario para entender a topologia)
     "Allow group ${oci_identity_group.developers.name} to read virtual-network-family in compartment network",
+  ]
+}
+
+
+# ============================================
+# 5. DYNAMIC GROUPS — Data Science Notebooks
+# ============================================
+# Dynamic Groups permitem que recursos OCI (como notebook sessions)
+# se autentiquem automaticamente via Resource Principal, sem credenciais
+# de usuário. A matching rule identifica o recurso pelo tipo e compartment.
+#
+# Estratégia de segurança por papel:
+# - Cientistas (dev-teste): leem gold, escrevem só em models
+# - Engenheiros (hackathon-2025): acesso completo a todos os buckets
+
+# Dynamic Group: Notebooks de Cientistas de Dados (compartment dev-teste)
+resource "oci_identity_dynamic_group" "datascience_notebooks" {
+  compartment_id = var.tenancy_ocid
+  name           = "${var.project_name}-datascience-notebooks"
+  description    = "Notebook sessions de cientistas de dados (compartment dev-teste)"
+
+  matching_rule = "Any {resource.type = 'datasciencenotebooksession', resource.compartment.id = '${oci_identity_compartment.dev_teste.id}'}"
+
+  freeform_tags = var.tags
+}
+
+# Dynamic Group: Notebooks de Engenheiros de Dados (compartment compute)
+resource "oci_identity_dynamic_group" "dataeng_notebooks" {
+  compartment_id = var.tenancy_ocid
+  name           = "${var.project_name}-dataeng-notebooks"
+  description    = "Notebook sessions de engenheiros de dados (compartment compute)"
+
+  matching_rule = "Any {resource.type = 'datasciencenotebooksession', resource.compartment.id = '${oci_identity_compartment.compute.id}'}"
+
+  freeform_tags = var.tags
+}
+
+
+# ============================================
+# 6. POLICIES — Data Science Notebooks (Resource Principal)
+# ============================================
+
+# Policy: Notebooks de Cientistas — acesso restrito
+# Lê gold (features prontas), escreve só em models (modelos treinados)
+resource "oci_identity_policy" "datascience_notebooks" {
+  compartment_id = var.tenancy_ocid
+  name           = "${var.project_name}-datascience-notebooks-policy"
+  description    = "Notebooks de cientistas: rede + leitura gold + escrita models"
+
+  depends_on = [oci_identity_dynamic_group.datascience_notebooks]
+
+  statements = [
+    # Rede: necessário para o notebook acessar Object Storage via Service Gateway
+    "Allow dynamic-group ${oci_identity_dynamic_group.datascience_notebooks.name} to use virtual-network-family in compartment ${var.project_name}",
+
+    # Gold: ler features prontas (ABT v6, features de recarga, pagamento, atraso)
+    "Allow dynamic-group ${oci_identity_dynamic_group.datascience_notebooks.name} to read object-family in compartment ${var.project_name} where target.bucket.name='hackathon-2025-gold-layer'",
+
+    # Models: salvar modelos treinados, artefatos, métricas
+    "Allow dynamic-group ${oci_identity_dynamic_group.datascience_notebooks.name} to manage object-family in compartment ${var.project_name} where target.bucket.name='hackathon-2025-models'",
+  ]
+}
+
+# Policy: Notebooks de Engenheiros — acesso completo aos buckets
+resource "oci_identity_policy" "dataeng_notebooks" {
+  compartment_id = var.tenancy_ocid
+  name           = "${var.project_name}-dataeng-notebooks-policy"
+  description    = "Notebooks de engenheiros: rede + acesso completo a todos os buckets"
+
+  depends_on = [oci_identity_dynamic_group.dataeng_notebooks]
+
+  statements = [
+    # Rede: necessário para o notebook acessar Object Storage via Service Gateway
+    "Allow dynamic-group ${oci_identity_dynamic_group.dataeng_notebooks.name} to use virtual-network-family in compartment ${var.project_name}",
+
+    # Storage: acesso completo a todos os buckets (landing, bronze, silver, gold, models, pipeline-ops)
+    "Allow dynamic-group ${oci_identity_dynamic_group.dataeng_notebooks.name} to manage object-family in compartment ${var.project_name}",
   ]
 }

@@ -106,41 +106,308 @@ variable "enable_lifecycle_policies" {
 
 
 # --- Compute (Fase 4) ---
+# Cada app tem sua própria configuração de shape.
+# Apps em grupos paralelos usam famílias de shapes diferentes para evitar
+# competição de quota no OCI free tier.
+#
+# Shapes fixos: driver_ocpus/memory = null (não precisa de shape_config)
+# Shapes Flex:  driver_ocpus/memory informados (gera shape_config no módulo)
 
 variable "dataflow_applications" {
-  description = "Mapa de aplicações Data Flow. Shape e autoscaling são padronizados no módulo compute."
+  description = "Mapa de aplicações Data Flow com shape por app"
   type = map(object({
-    display_name = string
-    script_name  = string
+    display_name    = string
+    script_name     = string
+    driver_shape    = string
+    executor_shape  = string
+    driver_ocpus    = optional(number)
+    driver_memory   = optional(number)
+    executor_ocpus  = optional(number)
+    executor_memory = optional(number)
+    min_executors   = number
+    max_executors   = number
   }))
   default = {
-    # Bronze (6 apps — ingestão)
-    bronze-bureau    = { display_name = "bronze-bureau",    script_name = "bronze_bureau.py" }
-    bronze-telco     = { display_name = "bronze-telco",     script_name = "bronze_telco.py" }
-    bronze-cadastro  = { display_name = "bronze-cadastro",  script_name = "bronze_cadastro.py" }
-    bronze-recarga   = { display_name = "bronze-recarga",   script_name = "bronze_recarga.py" }
-    bronze-pagamento = { display_name = "bronze-pagamento", script_name = "bronze_pagamento.py" }
-    bronze-atraso    = { display_name = "bronze-atraso",    script_name = "bronze_atraso.py" }
 
-    # Silver (6 apps — tipagem, validação, dedup)
-    silver-bureau    = { display_name = "silver-bureau",    script_name = "silver_bureau.py" }
-    silver-telco     = { display_name = "silver-telco",     script_name = "silver_telco.py" }
-    silver-cadastro  = { display_name = "silver-cadastro",  script_name = "silver_cadastro.py" }
-    silver-recarga   = { display_name = "silver-recarga",   script_name = "silver_recarga.py" }
-    silver-pagamento = { display_name = "silver-pagamento", script_name = "silver_pagamento.py" }
-    silver-atraso    = { display_name = "silver-atraso",    script_name = "silver_atraso.py" }
+    # ============================================================
+    # BRONZE (6 apps — ingestão, paralelo)
+    # Cada app usa uma família de shape diferente para rodar em paralelo.
+    # Configuração validada em teste manual (dataflow_vms.txt).
+    # ============================================================
 
-    # Gold Features (3 apps — feature engineering)
-    gold-recarga     = { display_name = "gold-recarga",     script_name = "gold_recarga.py" }
-    gold-pagamento   = { display_name = "gold-pagamento",   script_name = "gold_pagamento.py" }
-    gold-atraso      = { display_name = "gold-atraso",      script_name = "gold_atraso.py" }
+    bronze-bureau = {
+      display_name   = "bronze-bureau"
+      script_name    = "bronze_bureau.py"
+      driver_shape   = "VM.Standard2.1"
+      executor_shape = "VM.Standard2.1"
+      min_executors  = 2
+      max_executors  = 8
+    }
 
-    # ABT Builders (6 apps — joins + builder)
-    abt-v1           = { display_name = "abt-v1",           script_name = "abt_v1_builder.py" }
-    abt-v2           = { display_name = "abt-v2",           script_name = "abt_v2_builder.py" }
-    abt-v3           = { display_name = "abt-v3",           script_name = "abt_v3_builder.py" }
-    abt-v4           = { display_name = "abt-v4",           script_name = "abt_v4_builder.py" }
-    abt-v5           = { display_name = "abt-v5",           script_name = "abt_v5_builder.py" }
-    abt-v6           = { display_name = "abt-v6",           script_name = "abt_v6_builder.py" }
+    bronze-telco = {
+      display_name   = "bronze-telco"
+      script_name    = "bronze_telco.py"
+      driver_shape   = "VM.Standard2.2"
+      executor_shape = "VM.Standard2.2"
+      min_executors  = 2
+      max_executors  = 8
+    }
+
+    bronze-cadastro = {
+      display_name    = "bronze-cadastro"
+      script_name     = "bronze_cadastro.py"
+      driver_shape    = "VM.Standard.A1.Flex"
+      executor_shape  = "VM.Standard.A1.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 1
+      max_executors   = 8
+    }
+
+    bronze-atraso = {
+      display_name    = "bronze-atraso"
+      script_name     = "bronze_atraso.py"
+      driver_shape    = "VM.Standard3.Flex"
+      executor_shape  = "VM.Standard3.Flex"
+      driver_ocpus    = 1
+      driver_memory   = 8
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    bronze-pagamento = {
+      display_name    = "bronze-pagamento"
+      script_name     = "bronze_pagamento.py"
+      driver_shape    = "VM.Standard.E3.Flex"
+      executor_shape  = "VM.Standard.E3.Flex"
+      driver_ocpus    = 1
+      driver_memory   = 8
+      executor_ocpus  = 2
+      executor_memory = 16
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    bronze-recarga = {
+      display_name    = "bronze-recarga"
+      script_name     = "bronze_recarga.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 1
+      driver_memory   = 8
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    # ============================================================
+    # SILVER (6 apps — tipagem, validação, dedup, paralelo)
+    # Cada app usa uma família de shape diferente (mesma estratégia do Bronze).
+    # Configs mais potentes: Silver faz tipagem, validação e dedup.
+    # ============================================================
+
+    silver-bureau = {
+      display_name   = "silver-bureau"
+      script_name    = "silver_bureau.py"
+      driver_shape   = "VM.Standard2.1"
+      executor_shape = "VM.Standard2.1"
+      min_executors  = 2
+      max_executors  = 8
+    }
+
+    silver-telco = {
+      display_name   = "silver-telco"
+      script_name    = "silver_telco.py"
+      driver_shape   = "VM.Standard2.2"
+      executor_shape = "VM.Standard2.2"
+      min_executors  = 2
+      max_executors  = 8
+    }
+
+    silver-cadastro = {
+      display_name    = "silver-cadastro"
+      script_name     = "silver_cadastro.py"
+      driver_shape    = "VM.Standard.A1.Flex"
+      executor_shape  = "VM.Standard.A1.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 1
+      max_executors   = 8
+    }
+
+    silver-recarga = {
+      display_name    = "silver-recarga"
+      script_name     = "silver_recarga.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 1
+      driver_memory   = 8
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    silver-pagamento = {
+      display_name    = "silver-pagamento"
+      script_name     = "silver_pagamento.py"
+      driver_shape    = "VM.Standard.E3.Flex"
+      executor_shape  = "VM.Standard.E3.Flex"
+      driver_ocpus    = 1
+      driver_memory   = 8
+      executor_ocpus  = 2
+      executor_memory = 16
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    silver-atraso = {
+      display_name    = "silver-atraso"
+      script_name     = "silver_atraso.py"
+      driver_shape    = "VM.Standard3.Flex"
+      executor_shape  = "VM.Standard3.Flex"
+      driver_ocpus    = 1
+      driver_memory   = 8
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    # ============================================================
+    # GOLD FEATURES (3 apps — feature engineering, paralelo)
+    # Cada app usa uma família diferente (mesma estratégia do Bronze).
+    # Shapes mais potentes: 2 OCPU driver, 2 OCPU/32 GB executor.
+    # ============================================================
+
+    gold-recarga = {
+      display_name    = "gold-recarga"
+      script_name     = "gold_recarga.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    gold-pagamento = {
+      display_name    = "gold-pagamento"
+      script_name     = "gold_pagamento.py"
+      driver_shape    = "VM.Standard3.Flex"
+      executor_shape  = "VM.Standard3.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    gold-atraso = {
+      display_name    = "gold-atraso"
+      script_name     = "gold_atraso.py"
+      driver_shape    = "VM.Standard.A1.Flex"
+      executor_shape  = "VM.Standard.A1.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    # ============================================================
+    # ABT BUILDERS (6 apps — joins + builder, sequencial)
+    # Rodam sequencialmente (v1→v2→...→v6), podem usar o mesmo shape.
+    # Shape mais potente disponível: E4.Flex com 2 OCPU/32 GB.
+    # ============================================================
+
+    abt-v1 = {
+      display_name    = "abt-v1"
+      script_name     = "abt_v1_builder.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    abt-v2 = {
+      display_name    = "abt-v2"
+      script_name     = "abt_v2_builder.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    abt-v3 = {
+      display_name    = "abt-v3"
+      script_name     = "abt_v3_builder.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    abt-v4 = {
+      display_name    = "abt-v4"
+      script_name     = "abt_v4_builder.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    abt-v5 = {
+      display_name    = "abt-v5"
+      script_name     = "abt_v5_builder.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
+
+    abt-v6 = {
+      display_name    = "abt-v6"
+      script_name     = "abt_v6_builder.py"
+      driver_shape    = "VM.Standard.E4.Flex"
+      executor_shape  = "VM.Standard.E4.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
+    }
   }
 }

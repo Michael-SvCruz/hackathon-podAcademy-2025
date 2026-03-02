@@ -2,9 +2,20 @@
 # Variáveis — Módulo Airflow
 # ============================================================
 
+variable "tenancy_ocid" {
+  description = "OCID do Tenancy (necessário para criar Dynamic Group no nível do Tenancy)"
+  type        = string
+}
+
 variable "compartment_id" {
   description = "OCID do compartment de compute (vem do módulo IAM)"
   type        = string
+}
+
+variable "project_compartment_name" {
+  description = "Nome do compartment raiz do projeto (para referência nas policies)"
+  type        = string
+  default     = "hackathon-2025"
 }
 
 variable "public_subnet_id" {

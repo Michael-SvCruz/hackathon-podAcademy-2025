@@ -53,20 +53,22 @@ module "storage" {
 
 
 # ============================================
-# FASE 5: Airflow VM (Astro CLI self-hosted)
+# FASE 5: Airflow VM (Docker Compose self-hosted)
 # ============================================
 module "airflow" {
   source = "../../modules/airflow"
 
-  compartment_id   = module.iam.compute_compartment_id
-  public_subnet_id = module.network.public_subnet_id
-  vcn_id           = module.network.vcn_id
-  ssh_public_key   = var.airflow_ssh_public_key
-  project_name     = var.project_name
-  shape            = "VM.Standard.E3.Flex"
-  ocpus            = 1
-  memory_in_gbs    = 16
-  tags                = var.tags
+  tenancy_ocid             = var.tenancy_ocid
+  compartment_id           = module.iam.compute_compartment_id
+  project_compartment_name = var.project_name
+  public_subnet_id         = module.network.public_subnet_id
+  vcn_id                   = module.network.vcn_id
+  ssh_public_key           = var.airflow_ssh_public_key
+  project_name             = var.project_name
+  shape                    = "VM.Standard.E3.Flex"
+  ocpus                    = 1
+  memory_in_gbs            = 16
+  tags                     = var.tags
 }
 
 

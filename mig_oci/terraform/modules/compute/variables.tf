@@ -23,50 +23,27 @@ variable "bucket_pipeline_ops" {
 }
 
 
-# --- Shapes Data Flow ---
-# Shapes fixos (não Flex) devido a limitação de quota no OCI free tier.
-# VM.Standard2.1: 1 OCPU, 15 GB RAM
-# VM.Standard2.2: 2 OCPU, 30 GB RAM
-
-variable "driver_shape" {
-  description = "Shape da VM do driver Spark"
-  type        = string
-  default     = "VM.Standard2.1"
-}
-
-variable "executor_shape" {
-  description = "Shape das VMs dos executors Spark"
-  type        = string
-  default     = "VM.Standard2.2"
-}
-
-
-# --- Autoscaling (Spark Dynamic Allocation) ---
-# O Data Flow ajusta executors entre min e max conforme a carga do job.
-# Ref: https://docs.oracle.com/en-us/iaas/data-flow/using/autoscaling.htm
-
-variable "min_executors" {
-  description = "Número mínimo de executors (usado como num_executors inicial)"
-  type        = number
-  default     = 3
-}
-
-variable "max_executors" {
-  description = "Número máximo de executors (autoscaling via Spark Dynamic Allocation)"
-  type        = number
-  default     = 8
-}
-
-
 # --- Mapa de aplicações Data Flow ---
-# Cada entrada define uma aplicação. Shape e autoscaling são padronizados
-# para todas as apps (configurados nas variáveis acima).
+# Cada entrada define uma aplicação com sua própria configuração de shape.
+# Apps em grupos paralelos usam shapes de famílias diferentes para evitar
+# competição de quota no OCI free tier.
+#
+# Shapes fixos (Standard2.1, Standard2.2): não precisam de ocpus/memory.
+# Shapes Flex (E3, E4, Standard3, A1): precisam de ocpus e memory.
 
 variable "dataflow_applications" {
-  description = "Mapa de aplicações Data Flow (key = nome, value = config)"
+  description = "Mapa de aplicações Data Flow com configuração de shape por app"
   type = map(object({
-    display_name = string
-    script_name  = string
+    display_name    = string
+    script_name     = string
+    driver_shape    = string
+    executor_shape  = string
+    driver_ocpus    = optional(number)
+    driver_memory   = optional(number)
+    executor_ocpus  = optional(number)
+    executor_memory = optional(number)
+    min_executors   = number
+    max_executors   = number
   }))
 }
 
