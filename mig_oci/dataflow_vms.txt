@@ -1,0 +1,57 @@
+bronze-bureau
+Driver Shape = VM.Standard2.1
+Executor Shape = VM.Standard2.1
+Enable autoscaling = True
+Minimum number of executors = 2
+Maximum number of executors = 8
+
+bronze-telco
+Driver Shape = VM.Standard2.2
+Executor Shape = VM.Standard2.2
+Enable autoscaling = True
+Minimum number of executors = 2
+Maximum number of executors = 8
+
+bronze-cadastro
+Driver Shape = VM.Standard.A1.Flex
+Driver OCPUs = 2
+Driver memory (GB) = 16
+executor Shape = VM.Standard.A1.Flex
+Executor OCPUs = 2
+Executor memory (GB) = 32
+Enable autoscaling = True
+Minimum number of executors = 1
+Maximum number of executors = 8
+
+bronze-atraso
+Driver Shape = VM.Standard3.Flex
+Driver OCPUs = 1
+Driver memory (GB) = 8
+executor Shape = VM.Standard3.Flex
+Executor OCPUs = 2
+Executor memory (GB) = 32
+Enable autoscaling = True
+Minimum number of executors = 2
+Maximum number of executors = 8
+
+bronze-pagamento
+Driver Shape = VM.Standard.E3.Flex
+Driver OCPUs = 1
+Driver memory (GB) = 8
+executor Shape = VM.Standard.E3.Flex
+Executor OCPUs = 2
+Executor memory (GB) = 16
+Enable autoscaling = True
+Minimum number of executors = 2
+Maximum number of executors = 8
+
+bronze-recarga
+Driver Shape = VM.Standard.E4.Flex
+Driver OCPUs = 1
+Driver memory (GB) = 8
+executor Shape = VM.Standard.E4.Flex
+Executor OCPUs = 2
+Executor memory (GB) = 32
+Enable autoscaling = True
+Minimum number of executors = 2
+Maximum number of executors = 8
