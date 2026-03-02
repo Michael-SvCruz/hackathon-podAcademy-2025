@@ -37,12 +37,14 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
 
 log = logging.getLogger(__name__)
+log.info("Carregando DAG %s v%s", "pipeline_credit_risk_fpd", "2.1.0")
 
 # ============================================================
 # Configurações da DAG
 # ============================================================
 
 DAG_ID = "pipeline_credit_risk_fpd"
+DAG_VERSION = "2.1.0"  # Incrementar a cada deploy para confirmar reload no Airflow
 SCHEDULE = "0 2 1 * *"   # Todo dia 1 do mês às 02:00
 START_DATE = datetime(2026, 2, 1)
 
@@ -59,8 +61,13 @@ DEFAULT_ARGS = {
 RUN_TIMEOUT_SECONDS = 3 * 60 * 60
 POLL_INTERVAL_SECONDS = 60  # verifica status a cada 1 minuto
 
+# Retry para API rate limiting (HTTP 429 TooManyRequests)
+CREATE_RUN_MAX_RETRIES = 3
+CREATE_RUN_BASE_DELAY = 30  # segundos (backoff: 30s, 60s, 120s)
+
 # Estados terminais do Data Flow
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "DELETED"}
+ACTIVE_STATES = {"ACCEPTED", "IN_PROGRESS", "CANCELING"}
 SUCCESS_STATE = "SUCCEEDED"
 
 
@@ -89,6 +96,40 @@ def _get_oci_client():
         return oci.data_flow.DataFlowClient(config)
 
 
+def _find_active_run(client, compartment_id: str, app_id: str, display_name: str):
+    """
+    Busca um run ativo (ACCEPTED ou IN_PROGRESS) com o mesmo display_name.
+
+    Previne duplicatas quando o Airflow faz retry após SIGTERM: em vez de
+    criar um novo run (que falha com LimitExceeded), monitora o run existente.
+
+    Nota: list_runs só aceita UM filtro além de compartment_id, então
+    filtramos por application_id e checamos lifecycle_state em Python.
+
+    Returns:
+        run_id (str) se encontrar run ativo, None caso contrário.
+    """
+    try:
+        response = client.list_runs(
+            compartment_id,
+            application_id=app_id,
+            sort_by="timeCreated",
+            sort_order="DESC",
+            limit=20,
+        )
+        for run in response.data:
+            if run.lifecycle_state in ACTIVE_STATES and run.display_name == display_name:
+                log.info(
+                    "[%s] Encontrado run existente em estado %s (ID: %s)",
+                    display_name, run.lifecycle_state, run.id,
+                )
+                return run.id
+    except Exception as e:
+        log.warning("[%s] Erro ao buscar runs ativos: %s. Prosseguindo com create_run.", display_name, e)
+
+    return None
+
+
 def _trigger_and_wait(app_id: str, display_name: str, compartment_id: str) -> None:
     """
     Dispara um run do OCI Data Flow e aguarda até conclusão.
@@ -106,15 +147,49 @@ def _trigger_and_wait(app_id: str, display_name: str, compartment_id: str) -> No
 
     client = _get_oci_client()
 
-    # --- Disparar o run ---
-    run_details = oci.data_flow.models.CreateRunDetails(
-        application_id=app_id,
-        compartment_id=compartment_id,
-        display_name=display_name,
-    )
-    response = client.create_run(run_details)
-    run_id = response.data.id
-    log.info("Run criado: %s (ID: %s)", display_name, run_id)
+    # --- Verificar se já existe run ativo com mesmo display_name ---
+    run_id = _find_active_run(client, compartment_id, app_id, display_name)
+
+    if run_id:
+        log.info(
+            "[%s] Run ativo encontrado (ID: %s). Monitorando em vez de criar novo.",
+            display_name, run_id,
+        )
+    else:
+        # --- Disparar novo run (com retry para API rate limiting 429) ---
+        run_details = oci.data_flow.models.CreateRunDetails(
+            application_id=app_id,
+            compartment_id=compartment_id,
+            display_name=display_name,
+        )
+
+        for attempt in range(1, CREATE_RUN_MAX_RETRIES + 1):
+            try:
+                response = client.create_run(run_details)
+                break
+            except (oci.exceptions.TransientServiceError, oci.exceptions.ServiceError) as e:
+                is_limit = (
+                    isinstance(e, oci.exceptions.ServiceError)
+                    and getattr(e, "code", "") == "LimitExceeded"
+                )
+                is_transient = isinstance(e, oci.exceptions.TransientServiceError)
+                if not is_limit and not is_transient:
+                    raise
+                if attempt == CREATE_RUN_MAX_RETRIES:
+                    raise AirflowException(
+                        f"create_run falhou após {CREATE_RUN_MAX_RETRIES} tentativas "
+                        f"(último erro: {e})"
+                    )
+                delay = CREATE_RUN_BASE_DELAY * (2 ** (attempt - 1))
+                reason = "LimitExceeded (quota)" if is_limit else "429 TooManyRequests"
+                log.warning(
+                    "[%s] %s (tentativa %d/%d). Aguardando %ds antes de retry...",
+                    display_name, reason, attempt, CREATE_RUN_MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+
+        run_id = response.data.id
+        log.info("Run criado: %s (ID: %s)", display_name, run_id)
 
     # --- Polling até estado terminal ---
     elapsed = 0
@@ -182,7 +257,7 @@ with DAG(
     catchup=False,
     default_args=DEFAULT_ARGS,
     tags=["fpd", "credit-risk", "oci", "data-flow", "medallion"],
-    doc_md=__doc__,
+    doc_md=f"**DAG Version: {DAG_VERSION}**\n\n{__doc__}",
 ) as dag:
 
     # --------------------------------------------------------
