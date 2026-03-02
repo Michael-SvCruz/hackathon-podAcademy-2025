@@ -4,12 +4,17 @@ set -e
 # ============================================
 # Upload de scripts PySpark para OCI Object Storage
 # ============================================
-# Faz upload dos 17 scripts adaptados + utils.zip para o bucket landing-zone.
+# Faz upload dos 21 scripts adaptados + utils.zip para o bucket pipeline-ops.
 # Necessário ANTES de executar a Fase 4 do Terraform (Data Flow).
+#
+# Estrutura no bucket pipeline-ops:
+#   scripts/   <- 21 scripts PySpark (referenciados no file_uri das apps)
+#   libs/      <- utils.zip (dependencias Python)
+#   logs/      <- criado automaticamente pelo Data Flow na execucao
 #
 # Pré-requisitos:
 #   - OCI CLI configurado (oci setup config)
-#   - Bucket landing-zone criado (Fase 3 do Terraform)
+#   - Bucket pipeline-ops criado (Fase 3 do Terraform)
 #
 # Uso:
 #   ./upload_scripts.sh
@@ -19,7 +24,7 @@ SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 LIBS_DIR="$SCRIPT_DIR/libs"
 
 # Configuração
-BUCKET_NAME="hackathon-2025-landing-zone"
+BUCKET_NAME="hackathon-2025-pipeline-ops"
 NAMESPACE=$(oci os ns get --query 'data' --raw-output 2>/dev/null)
 
 if [ -z "$NAMESPACE" ]; then
@@ -31,9 +36,9 @@ fi
 echo "=== Upload de Scripts para OCI ==="
 echo ""
 echo "Namespace: $NAMESPACE"
-echo "Bucket:    $BUCKET_NAME"
-echo "Scripts:   $SCRIPTS_DIR/"
-echo "Libs:      $LIBS_DIR/"
+echo "Bucket:    $BUCKET_NAME  (pipeline-ops)"
+echo "Scripts:   $SCRIPTS_DIR/ → $BUCKET_NAME/scripts/"
+echo "Libs:      $LIBS_DIR/    → $BUCKET_NAME/libs/"
 echo ""
 
 # --- Passo 1: Empacotar utils.zip ---
@@ -108,3 +113,8 @@ echo "  oci os object list --bucket-name $BUCKET_NAME --prefix libs/ --query 'da
 echo ""
 echo "Próximo passo:"
 echo "  cd ../terraform/scripts && ./apply_phase.sh 4"
+echo ""
+echo "Nota: Os scripts antigos no bucket landing-zone (prefix scripts/ e libs/)"
+echo "      podem ser removidos via Console OCI ou:"
+echo "  oci os object bulk-delete --bucket-name hackathon-2025-landing-zone --prefix scripts/ --force"
+echo "  oci os object bulk-delete --bucket-name hackathon-2025-landing-zone --prefix libs/ --force"
