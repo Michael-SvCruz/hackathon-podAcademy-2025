@@ -1,0 +1,39 @@
+======================================================================
+DADOS PARA APRESENTAÇÃO — KS INCREMENTAL
+======================================================================
+
+1. KS INCREMENTAL POR BLOCO (LightGBM)
+----------------------------------------------------------------------
+Bloco                     ABT    Features   KS OOT     Delta     
+----------------------------------------------------------------------
+Score_01                  v1     1          26.67      baseline  
++ Score_02                v2     2          31.25      +4.58     
++ Telco                   v3     89         31.51      +0.26     
++ Cadastro                v4     95         31.70      +0.19     
++ Recarga                 v5     160        33.95      +2.25     
++ Pagamento + Atraso      v6     261        34.39      +0.44     
+
+2. COMPARAÇÃO DE MODELOS
+----------------------------------------------------------------------
+Modelo                         KS OOT (%)      vs Benchmark   
+----------------------------------------------------------------------
+Logistic Regression            30.73           -2.37          
+LightGBM (OCI VM)              34.39           +1.29          
+Benchmark Claro                33.10           —              
+
+3. MÉTRICAS FINAIS (OCI VM)
+----------------------------------------------------------------------
+  ks_oot: 34.39
+  auc_oot: 0.7327
+  gini_oot: 46.54
+  n_features: 261
+  best_iteration: 900
+  benchmark: 33.1%
+  gap: +1.29 p.p.
+
+4. NOTA SOBRE VALORES
+----------------------------------------------------------------------
+- TODOS os valores são EXATOS — treinamento independente por ABT
+- Fonte: metricas/ks_incremental_20260307_1850.json (OCI VM)
+- Mesmos hiperparâmetros LightGBM em todas as ABTs
+- Benchmark Claro: 33.10% (definido pela coordenação)

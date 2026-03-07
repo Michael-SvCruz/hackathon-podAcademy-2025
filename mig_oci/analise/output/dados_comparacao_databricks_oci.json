@@ -1,0 +1,96 @@
+{
+  "ks_incremental_databricks": {
+    "labels": [
+      "Score_01",
+      "+ Score_02",
+      "+ Telco",
+      "+ Cadastro",
+      "+ Recarga",
+      "+ Pag+Atraso"
+    ],
+    "ks_oot": [
+      28.81,
+      29.8,
+      30.5,
+      31.2,
+      32.1,
+      33.94
+    ],
+    "n_features": [
+      2,
+      4,
+      72,
+      105,
+      179,
+      264
+    ],
+    "nota": "Score_01 e Final exatos; intermediários aproximados"
+  },
+  "ks_incremental_oci_vm": {
+    "labels": [
+      "Score_01",
+      "+ Score_02",
+      "+ Telco",
+      "+ Cadastro",
+      "+ Recarga",
+      "+ Pag+Atraso"
+    ],
+    "ks_oot": [
+      26.67,
+      31.25,
+      31.51,
+      31.7,
+      33.95,
+      34.39
+    ],
+    "n_features": [
+      1,
+      2,
+      89,
+      95,
+      160,
+      261
+    ],
+    "nota": "Todos valores exatos — treinamento independente por ABT"
+  },
+  "metricas_finais": {
+    "databricks": {
+      "ks_oot": 33.94,
+      "auc_oot": 0.7327,
+      "gini_oot": 46.54,
+      "n_features": 264,
+      "best_iteration": null
+    },
+    "oci_vm": {
+      "ks_oot": 34.39,
+      "auc_oot": 0.7327,
+      "gini_oot": 46.54,
+      "n_features": 261,
+      "best_iteration": 900
+    },
+    "benchmark": 33.1
+  },
+  "custos_mensais": {
+    "Databricks": {
+      "Plataforma (DBUs)": 800,
+      "Compute (clusters)": 400,
+      "Storage (DBFS)": 50,
+      "Jobs/Workflows": 200,
+      "Total": 1450
+    },
+    "OCI": {
+      "Data Flow (3 runs)": 240,
+      "Storage (295 GB)": 10,
+      "Airflow VM (E3.Flex)": 60,
+      "Modelo VM (E5.Flex)": 40,
+      "Total": 350
+    }
+  },
+  "ganho_ks": {
+    "databricks": 33.94,
+    "oci_vm": 34.39,
+    "delta": 0.45,
+    "vs_benchmark_databricks": 0.84,
+    "vs_benchmark_oci": 1.29
+  }
+}

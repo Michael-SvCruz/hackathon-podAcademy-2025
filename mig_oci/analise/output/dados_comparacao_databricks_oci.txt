@@ -1,0 +1,27 @@
+======================================================================
+COMPARAÇÃO DATABRICKS vs OCI VM
+======================================================================
+
+1. MÉTRICAS DO MODELO FINAL
+----------------------------------------------------------------------
+Métrica              Databricks      OCI VM          Delta          
+----------------------------------------------------------------------
+KS OOT (%)           33.94           34.39           +0.45          
+AUC OOT              0.7327          0.7327          =              
+GINI OOT (%)         46.54           46.54           =              
+Features             264             261             -3             
+vs Benchmark         +0.84 p.p.      +1.29 p.p.      +0.45          
+
+2. CUSTO MENSAL (PRODUÇÃO)
+----------------------------------------------------------------------
+Databricks           $1,450/mês
+OCI                  $350/mês
+Economia             $1,100/mês (-76%)
+
+3. GANHOS DA MIGRAÇÃO
+----------------------------------------------------------------------
+- Performance: +0.45 p.p. (KS 33.94% → 34.39%)
+- Custo: -76% ($1,450 → $350/mês)
+- Infraestrutura: 100% IaC (Terraform, 6 módulos)
+- Orquestração: Airflow (ETL + Modelo encadeado)
+- Reprodutibilidade: Clone + Terraform + Deploy (~2h)
