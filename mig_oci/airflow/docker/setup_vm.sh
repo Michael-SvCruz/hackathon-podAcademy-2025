@@ -25,6 +25,7 @@ AIRFLOW_DIR="/opt/airflow-fpd"
 COMPOSE_FILE="$AIRFLOW_DIR/docker-compose.yml"
 VARIABLES_FILE="$AIRFLOW_DIR/config/airflow_variables_filled.json"
 DAG_FILE="$AIRFLOW_DIR/dags/dag_pipeline_fpd.py"
+DAG_MODELO_FILE="$AIRFLOW_DIR/dags/dag_modelo_qualificacao.py"
 
 # Cores para output
 GREEN='\033[0;32m'
@@ -54,8 +55,11 @@ ok "Docker Compose: $(docker compose version --short)"
 [ -f "$COMPOSE_FILE" ] || fail "docker-compose.yml não encontrado em $AIRFLOW_DIR/"
 ok "docker-compose.yml encontrado"
 
-[ -f "$DAG_FILE" ] || warn "DAG não encontrada em $DAG_FILE (copie antes de ativar)"
-[ -f "$DAG_FILE" ] && ok "DAG encontrada: dag_pipeline_fpd.py"
+[ -f "$DAG_FILE" ] || warn "DAG ETL não encontrada em $DAG_FILE (copie antes de ativar)"
+[ -f "$DAG_FILE" ] && ok "DAG ETL encontrada: dag_pipeline_fpd.py"
+
+[ -f "$DAG_MODELO_FILE" ] || warn "DAG Modelo não encontrada em $DAG_MODELO_FILE (copie antes de ativar)"
+[ -f "$DAG_MODELO_FILE" ] && ok "DAG Modelo encontrada: dag_modelo_qualificacao.py"
 
 [ -f "$VARIABLES_FILE" ] || warn "airflow_variables_filled.json não encontrado (importe manualmente depois)"
 [ -f "$VARIABLES_FILE" ] && ok "Variables JSON encontrado: $(wc -l < "$VARIABLES_FILE") linhas"
@@ -145,9 +149,19 @@ for i in $(seq 1 30); do
         docker compose exec -T airflow-scheduler \
             airflow dags unpause pipeline_credit_risk_fpd &>/dev/null
         ok "DAG pipeline_credit_risk_fpd ativada"
+
+        # Ativar DAG do modelo (necessária para o TriggerDagRunOperator)
+        MODELO_EXISTS=$(docker compose exec -T airflow-scheduler airflow dags list 2>/dev/null | grep -c "pipeline_modelo_qualificacao" || echo "0")
+        if [ "$MODELO_EXISTS" -gt 0 ]; then
+            docker compose exec -T airflow-scheduler \
+                airflow dags unpause pipeline_modelo_qualificacao &>/dev/null
+            ok "DAG pipeline_modelo_qualificacao ativada"
+        else
+            warn "DAG pipeline_modelo_qualificacao não detectada ainda (pode levar mais 30s)"
+        fi
         break
     fi
-    [ "$i" -eq 30 ] && warn "DAG não detectada em 90s. Verifique: docker compose logs airflow-scheduler"
+    [ "$i" -eq 30 ] && warn "DAGs não detectadas em 90s. Verifique: docker compose logs airflow-scheduler"
     sleep 3
 done
 

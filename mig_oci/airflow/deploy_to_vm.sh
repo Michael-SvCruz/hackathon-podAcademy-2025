@@ -71,8 +71,10 @@ copy_file "$SCRIPT_DIR/docker/docker-compose.yml" "$REMOTE_DIR/docker-compose.ym
 # Setup script
 copy_file "$SCRIPT_DIR/docker/setup_vm.sh" "$REMOTE_DIR/setup_vm.sh"
 
-# DAG
+# DAGs
 copy_file "$SCRIPT_DIR/dags/dag_pipeline_fpd.py" "$REMOTE_DIR/dags/dag_pipeline_fpd.py"
+copy_file "$SCRIPT_DIR/dags/dag_modelo_qualificacao.py" "$REMOTE_DIR/dags/dag_modelo_qualificacao.py"
+copy_file "$SCRIPT_DIR/dags/dag_pipeline_fpd_sequential.py" "$REMOTE_DIR/dags/dag_pipeline_fpd_sequential.py"
 
 # Variables (preenchido)
 copy_file "$SCRIPT_DIR/config/airflow_variables_filled.json" "$REMOTE_DIR/config/airflow_variables_filled.json"

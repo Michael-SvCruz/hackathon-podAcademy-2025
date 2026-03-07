@@ -28,7 +28,7 @@ Pasta de configuração do Apache Airflow responsável por orquestrar o pipeline
 
 ## 1. Visão Geral
 
-O Airflow atua como **maestro** do pipeline: dispara as 21 aplicações OCI Data Flow na ordem correta, aguarda a conclusão de cada etapa e encadeia as dependências automaticamente.
+O Airflow atua como **maestro** do pipeline: dispara as 21 aplicações OCI Data Flow na ordem correta, aguarda a conclusão de cada etapa e encadeia as dependências automaticamente, **incluindo o disparo do modelo de scoring ao final**.
 
 ```
 Bronze (6 apps, paralelo)
@@ -42,11 +42,33 @@ Gold Features (3 apps, paralelo)
 
 ABT (6 apps, sequencial)
   └── v1 → v2 → v3 → v4 → v5 → v6 (~614 features, 3.79M registros)
+
+Modelo Scoring (TriggerDagRunOperator)
+  └── pipeline_modelo_qualificacao: VM Start → SSH scoring → VM Stop
 ```
 
 **Agendamento:** Todo dia 1 do mês às 02:00 (UTC-3 / Horário de Brasília).
 
 **Infraestrutura:** Apache Airflow 2.8.0 via Docker Compose (LocalExecutor) em VM OCI.
+
+### Arquitetura de Encadeamento (ETL → Modelo)
+
+O pipeline utiliza **duas DAGs separadas** conectadas via `TriggerDagRunOperator`:
+
+| DAG | Responsabilidade | Schedule |
+|-----|------------------|----------|
+| `pipeline_credit_risk_fpd` | ETL completo (Bronze→ABT) + trigger do modelo | `0 2 1 * *` (mensal) |
+| `pipeline_modelo_qualificacao` | Scoring (VM Start→SSH→Stop) | `None` (trigger automático ou manual) |
+
+**Por que duas DAGs em vez de uma?**
+
+1. **Isolamento de logs e retries:** Cada DAG tem seus próprios logs, contadores de retry e SLAs. Um problema no modelo não polui o histórico do ETL e vice-versa.
+2. **Re-scoring independente:** O modelo pode ser re-executado manualmente (via UI ou CLI) sem re-processar os dados. Útil para ajuste de hiperparâmetros ou atualização do `.pkl`.
+3. **Re-ETL independente:** O pipeline de dados pode ser re-executado sem disparar o modelo (basta desativar o trigger ou usar a DAG sequencial).
+4. **Monitoramento granular:** Na UI do Airflow, cada DAG aparece como uma linha separada no Grid View, facilitando a identificação de gargalos.
+5. **Separação de responsabilidades:** Engenharia de dados (ETL) e Ciência de dados (Modelo) são domínios distintos com equipes e ciclos de vida diferentes.
+
+O `TriggerDagRunOperator` garante que a DAG do modelo **só é disparada se todo o ETL completar com sucesso** (`wait_for_completion=True`, `allowed_states=["success"]`).
 
 ---
 
@@ -55,8 +77,11 @@ ABT (6 apps, sequencial)
 ```
 mig_oci/airflow/
 ├── deploy_to_vm.sh                    # [LOCAL] Copia arquivos + executa setup na VM
+├── deploy_modelo.sh                   # [LOCAL] Deploy script scoring (via jump host)
 ├── dags/
-│   └── dag_pipeline_fpd.py            # DAG principal do pipeline completo
+│   ├── dag_pipeline_fpd.py            # DAG principal: ETL completo + trigger modelo
+│   ├── dag_pipeline_fpd_sequential.py # DAG alternativa: 1 app por vez (teste quota)
+│   └── dag_modelo_qualificacao.py     # DAG modelo: VM Start → SSH scoring → VM Stop
 ├── plugins/
 │   └── oci_operators/                 # Reservado para operators customizados OCI
 ├── config/
@@ -353,25 +378,46 @@ oci iam compartment list --query 'data[0].name' --raw-output
 
 ## 8. Execução e Monitoramento
 
-### Trigger manual
+### Pipeline completo (ETL + Modelo)
+
+O trigger da DAG `pipeline_credit_risk_fpd` executa **automaticamente** o pipeline end-to-end:
+
+```
+Bronze (paralelo) → Silver (paralelo) → Gold Features (paralelo)
+  → ABT v1→v6 (sequencial) → Trigger Modelo (TriggerDagRunOperator)
+      → VM Start → SSH scoring → VM Stop
+```
 
 ```bash
-# Via CLI na VM
+# Via CLI na VM — Executar na VM Airflow
 docker compose exec airflow-scheduler \
   airflow dags trigger pipeline_credit_risk_fpd
 
-# Com run_id customizado
+# Com run_id customizado — Executar na VM Airflow
 docker compose exec airflow-scheduler \
-  airflow dags trigger pipeline_credit_risk_fpd --run-id manual_2026_02_25
+  airflow dags trigger pipeline_credit_risk_fpd --run-id manual_2026_03_05
 ```
 
 Ou via UI: DAG > Trigger DAG (botão ▶).
 
+### Re-scoring independente (sem re-ETL)
+
+Para re-executar apenas o modelo (ex: após atualizar o `.pkl` ou ajustar hiperparâmetros):
+
+```bash
+# Via CLI na VM — Executar na VM Airflow
+docker compose exec airflow-scheduler \
+  airflow dags trigger pipeline_modelo_qualificacao
+```
+
+Ou via UI: DAG `pipeline_modelo_qualificacao` > Trigger DAG (botão ▶).
+
 ### Monitoramento na UI
 
 - **Grid View:** Histórico de execuções por task — verde = sucesso, vermelho = falha
-- **Graph View:** Dependências visuais entre grupos (Bronze → Silver → Gold → ABT)
+- **Graph View:** Dependências visuais entre grupos (Bronze → Silver → Gold → ABT → Modelo)
 - **Logs:** Clique na task > View Log para ver o polling de status do Data Flow run
+- **Task `trigger_modelo_qualificacao`:** Mostra o status da DAG do modelo (aguarda conclusão)
 
 ### Monitoramento no Console OCI
 
@@ -469,6 +515,10 @@ sed -i 's/\r//' docker/docker-compose.yml docker/setup_vm.sh deploy_to_vm.sh
 | `mig_oci/docs/FASE_6A_LANDING_BRONZE.md` | Pipeline Landing → Bronze (as-built) |
 | `mig_oci/docs/FASE_6B_SILVER.md` | Silver Layer: 6 scripts, dedup, BYTES calibração |
 | `mig_oci/docs/FASE_6B_GOLD_FEATURES.md` | Gold Features: 3 scripts, 2 actions, quality gates |
+| `mig_oci/docs/FASE_8_MODELO_VM_IMPLEMENTACAO.md` | Modelo scoring em VM dedicada (as-built) |
+| `mig_oci/docs/FASE_8_TROUBLESHOOTING.md` | Troubleshooting: OOM, SSH, deploy, CRLF |
 | `mig_oci/terraform/modules/airflow/` | Módulo Terraform da VM Airflow (cloud-init, Security List) |
+| `mig_oci/terraform/modules/modelo_vm/` | Módulo Terraform da VM Modelo (E5.Flex, Dynamic Group) |
 | `mig_oci/terraform/environments/prod/` | IaC que criou os 21 apps (Terraform Fase 4) |
+| `mig_oci/data_science/scripts/modelo_qualificacao.py` | Script scoring: pandas + LightGBM, Instance Principal |
 | `docs/architecture/OCI_TERRAFORM_AIRFLOW.md` | Arquitetura geral OCI + Airflow |

@@ -1,13 +1,26 @@
 """
 DAG: pipeline_credit_risk_fpd
 =================================
-Orquestra o pipeline completo de risco de crédito FPD no OCI Data Flow.
+Orquestra o pipeline completo de risco de crédito FPD no OCI Data Flow,
+incluindo o disparo automático do modelo de scoring ao final.
 
 Arquitetura Medallion (Medallion Architecture):
     Bronze (6 apps, paralelo)
     → Silver (6 apps, paralelo)
     → Gold Features (3 apps, paralelo)
     → ABT (6 apps, sequencial: v1→v2→v3→v4→v5→v6)
+    → Trigger Modelo (TriggerDagRunOperator → pipeline_modelo_qualificacao)
+
+Encadeamento ETL → Modelo:
+    Utiliza TriggerDagRunOperator para disparar a DAG de scoring automaticamente
+    após a conclusão do ETL. Esta abordagem mantém as DAGs independentes — cada
+    uma com seus próprios logs, retries e SLAs — enquanto garante execução
+    sequencial em produção. A DAG do modelo só é disparada se TODO o ETL
+    completar com sucesso.
+
+    A DAG de scoring (pipeline_modelo_qualificacao) também pode ser executada
+    de forma independente via trigger manual, mantendo a flexibilidade para
+    re-scoring sem re-processamento dos dados.
 
 Cada task dispara uma aplicação OCI Data Flow (criada via Terraform Fase 4)
 e aguarda a conclusão por polling (lifecycle_state = SUCCEEDED | FAILED).
@@ -34,6 +47,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.task_group import TaskGroup
 
 log = logging.getLogger(__name__)
@@ -44,7 +58,7 @@ log.info("Carregando DAG %s v%s", "pipeline_credit_risk_fpd", "2.1.0")
 # ============================================================
 
 DAG_ID = "pipeline_credit_risk_fpd"
-DAG_VERSION = "2.1.0"  # Incrementar a cada deploy para confirmar reload no Airflow
+DAG_VERSION = "3.0.0"  # Incrementar a cada deploy para confirmar reload no Airflow
 SCHEDULE = "0 2 1 * *"   # Todo dia 1 do mês às 02:00
 START_DATE = datetime(2026, 2, 1)
 
@@ -251,7 +265,7 @@ def make_task(task_id: str, app_var: str, run_label: str):
 
 with DAG(
     dag_id=DAG_ID,
-    description="Pipeline FPD completo: Bronze → Silver → Gold Features → ABT v6",
+    description="Pipeline FPD completo: Bronze → Silver → Gold Features → ABT v6 → Modelo Scoring",
     schedule_interval=SCHEDULE,
     start_date=START_DATE,
     catchup=False,
@@ -313,6 +327,21 @@ with DAG(
         abt_v1 >> abt_v2 >> abt_v3 >> abt_v4 >> abt_v5 >> abt_v6
 
     # --------------------------------------------------------
+    # TRIGGER MODELO — Dispara DAG de scoring após ETL completo
+    # Usa TriggerDagRunOperator para manter DAGs independentes
+    # (logs, retries e SLAs separados) com encadeamento automático.
+    # --------------------------------------------------------
+    trigger_modelo = TriggerDagRunOperator(
+        task_id="trigger_modelo_qualificacao",
+        trigger_dag_id="pipeline_modelo_qualificacao",
+        wait_for_completion=True,
+        poke_interval=60,           # verifica status a cada 60s
+        allowed_states=["success"],  # só considera sucesso se modelo completou OK
+        failed_states=["failed"],
+        reset_dag_run=True,          # permite re-trigger mesmo se já existe run no mesmo dia
+    )
+
+    # --------------------------------------------------------
     # Dependências entre grupos (ordem do pipeline)
     # --------------------------------------------------------
-    tg_bronze >> tg_silver >> tg_gold >> tg_abt
+    tg_bronze >> tg_silver >> tg_gold >> tg_abt >> trigger_modelo
