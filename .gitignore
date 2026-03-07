@@ -210,10 +210,13 @@ __marimo__/
 
 informacoes_adicionais/
 
-mig_oci/data_science/
-
 docs/00_execution_outputs_reports/
 
 .claude
 
 src/jobs/04_modeling/
+
+# Arquivos grandes (binários)
+*.tar.gz
+*.pkl
+mig_oci/data_upload/libs/
