@@ -7,7 +7,7 @@
 #   - Dynamic Group + Policy para Instance Principal (Object Storage)
 #   - Padrão Start/Stop: VM fica STOPPED e só liga durante scoring
 #
-# Shape: VM.Standard.E5.Flex (1 OCPU, 16 GB)
+# Shape: VM.Standard.E5.Flex (2 OCPUs, 32 GB)
 # Evita conflito de quota com shapes do pipeline ETL (E3, E4, Standard2/3, A1)
 
 terraform {
