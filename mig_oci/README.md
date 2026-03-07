@@ -1,5 +1,7 @@
 # Migração OCI - Hackathon PodAcademy 2025
 
+![Arquitetura OCI - Hackathon PodAcademy 2025](../docs/architecture/11.png)
+
 Migração do projeto de Databricks para Oracle Cloud Infrastructure (OCI) usando Terraform, OCI Data Flow (Spark gerenciado), Airflow (orquestração) e VM dedicada para scoring LightGBM.
 
 ## Status das Fases
