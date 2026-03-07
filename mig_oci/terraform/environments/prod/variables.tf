@@ -96,6 +96,15 @@ variable "airflow_ssh_public_key" {
 }
 
 
+# --- Modelo VM (Fase 6) ---
+
+variable "modelo_ssh_public_key" {
+  description = "Chave SSH pública para a VM do Modelo (pode ser a mesma da Airflow)"
+  type        = string
+  sensitive   = true
+}
+
+
 # --- Storage (Fase 3) ---
 
 variable "enable_lifecycle_policies" {
@@ -409,5 +418,9 @@ variable "dataflow_applications" {
       min_executors   = 2
       max_executors   = 8
     }
+
+    # MODELO removido do Data Flow — migrado para VM dedicada (modules/modelo_vm)
+    # Motivo: Data Flow não suporta dependências customizadas (lightgbm, scikit-learn)
+    # O scoring agora roda em VM.Standard.E5.Flex com Start/Stop via Airflow
   }
 }

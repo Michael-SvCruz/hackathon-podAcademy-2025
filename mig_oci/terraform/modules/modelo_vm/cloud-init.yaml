@@ -1,0 +1,42 @@
+#cloud-config
+# ============================================================
+# cloud-init — VM Modelo de Scoring (Oracle Linux 8)
+# ============================================================
+# Executado automaticamente na primeira inicialização da VM.
+# Instala: Python 3.11 + LightGBM + scikit-learn + pandas + OCI SDK
+# Cria diretório /opt/modelo-fpd/ para o script de scoring.
+#
+# NAT Gateway da private subnet permite pip install.
+# Log: /var/log/cloud-init-output.log
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - curl
+  - git
+
+runcmd:
+  # --- Python 3.11 via AppStream (Oracle Linux 8) ---
+  - dnf module enable python311 -y
+  - dnf install -y python3.11 python3.11-pip python3.11-devel
+
+  # --- Dependências do modelo ---
+  - python3.11 -m pip install --upgrade pip
+  - python3.11 -m pip install lightgbm==3.3.5 scikit-learn==1.3.2 pandas==2.0.3 numpy==1.24.4 pyarrow==14.0.2 oci==2.119.1
+
+  # --- Diretório do script de scoring ---
+  - mkdir -p /opt/modelo-fpd
+  - chown -R opc:opc /opt/modelo-fpd
+
+  # --- Sinalizar conclusão ---
+  - echo "cloud-init concluído em $(date)" >> /var/log/modelo-setup.log
+  - python3.11 -c "import lightgbm; print(f'LightGBM {lightgbm.__version__} instalado com sucesso')" >> /var/log/modelo-setup.log
+
+final_message: |
+  VM Modelo de Scoring configurada com sucesso.
+  Verificação (SSH como opc via Airflow jump host):
+    python3.11 -c "import lightgbm; print(lightgbm.__version__)"  # → 3.3.5
+    python3.11 -c "import oci; print('OCI SDK OK')"
+  Deploy do script:
+    scp modelo_qualificacao.py opc@<PRIVATE_IP>:/opt/modelo-fpd/

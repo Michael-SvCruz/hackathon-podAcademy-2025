@@ -75,20 +75,22 @@ resource "oci_dataflow_application" "apps" {
   warehouse_bucket_uri = "oci://${var.bucket_pipeline_ops}@${var.namespace}/warehouse/"
 
   # Delta Lake + Autoscaling (Spark Dynamic Allocation)
-  configuration = {
-    # Delta Lake
-    "spark.sql.extensions"            = "io.delta.sql.DeltaSparkSessionExtension"
-    "spark.sql.catalog.spark_catalog" = "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+  configuration = merge(
+    {
+      # Delta Lake
+      "spark.sql.extensions"            = "io.delta.sql.DeltaSparkSessionExtension"
+      "spark.sql.catalog.spark_catalog" = "org.apache.spark.sql.delta.catalog.DeltaCatalog"
 
-    # Autoscaling via Spark Dynamic Allocation (per-app min/max)
-    "spark.dynamicAllocation.enabled"                 = "true"
-    "spark.dynamicAllocation.shuffleTracking.enabled"  = "true"
-    "spark.dynamicAllocation.minExecutors"             = tostring(each.value.min_executors)
-    "spark.dynamicAllocation.maxExecutors"             = tostring(each.value.max_executors)
-    "spark.dynamicAllocation.executorIdleTimeout"      = "60"
-    "spark.dynamicAllocation.schedulerBacklogTimeout"  = "60"
-    "spark.dataflow.dynamicAllocation.quotaPolicy"     = "min"
-  }
+      # Autoscaling via Spark Dynamic Allocation (per-app min/max)
+      "spark.dynamicAllocation.enabled"                 = "true"
+      "spark.dynamicAllocation.shuffleTracking.enabled"  = "true"
+      "spark.dynamicAllocation.minExecutors"             = tostring(each.value.min_executors)
+      "spark.dynamicAllocation.maxExecutors"             = tostring(each.value.max_executors)
+      "spark.dynamicAllocation.executorIdleTimeout"      = "60"
+      "spark.dynamicAllocation.schedulerBacklogTimeout"  = "60"
+      "spark.dataflow.dynamicAllocation.quotaPolicy"     = "min"
+    }
+  )
 
   arguments = [var.namespace]
 

@@ -76,6 +76,17 @@ output "airflow_info" {
 }
 
 
+# --- Fase 6: Modelo VM ---
+
+output "modelo_vm_info" {
+  description = "Informações da VM do Modelo de Scoring"
+  value = {
+    vm_id      = module.modelo_vm.modelo_vm_id
+    private_ip = module.modelo_vm.modelo_private_ip
+  }
+}
+
+
 # --- Fase 4: Compute ---
 
 output "dataflow_applications" {

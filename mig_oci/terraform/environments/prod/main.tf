@@ -73,6 +73,25 @@ module "airflow" {
 
 
 # ============================================
+# FASE 6: VM Modelo de Scoring (Start/Stop via Airflow)
+# ============================================
+module "modelo_vm" {
+  source = "../../modules/modelo_vm"
+
+  tenancy_ocid             = var.tenancy_ocid
+  compartment_id           = module.iam.compute_compartment_id
+  project_compartment_name = var.project_name
+  private_data_subnet_id   = module.network.private_data_subnet_id
+  ssh_public_key           = var.modelo_ssh_public_key
+  project_name             = var.project_name
+  shape                    = "VM.Standard.E5.Flex"
+  ocpus                    = 2       # anterior: 1 (reverter se quota OCI negar)
+  memory_in_gbs            = 32      # anterior: 16 (reverter se quota OCI negar)
+  tags                     = var.tags
+}
+
+
+# ============================================
 # FASE 4: Compute (Data Flow Applications)
 # ============================================
 module "compute" {

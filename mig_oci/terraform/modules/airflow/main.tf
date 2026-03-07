@@ -67,6 +67,13 @@ resource "oci_core_instance" "airflow" {
   freeform_tags = merge(var.tags, {
     role = "airflow"
   })
+
+  # Ignorar mudanças de imagem após criação da VM.
+  # Sem isso, o Terraform tenta trocar o boot volume quando uma nova
+  # imagem Oracle Linux 8 é publicada, causando erro de kmsKeyId.
+  lifecycle {
+    ignore_changes = [source_details]
+  }
 }
 
 # ============================================================
@@ -149,5 +156,8 @@ resource "oci_identity_policy" "airflow_instance_principal" {
 
     # Network: Data Flow precisa das subnets para executar
     "Allow dynamic-group ${oci_identity_dynamic_group.airflow_vm.name} to read virtual-network-family in compartment ${var.project_compartment_name}",
+
+    # Compute: Start/Stop da VM do Modelo de Scoring (orquestrada pelo Airflow)
+    "Allow dynamic-group ${oci_identity_dynamic_group.airflow_vm.name} to manage instance-family in compartment ${var.project_compartment_name}",
   ]
 }
