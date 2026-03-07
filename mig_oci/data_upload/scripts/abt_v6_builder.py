@@ -431,6 +431,25 @@ def main():
             .option("overwriteSchema", "true") \
             .save(args.output_path)
         print(">>> [Escrita] ABT v6 gravada com sucesso.")
+
+        # -----------------------------------------------------------------
+        # VACUUM — Remove parquets órfãos de execuções anteriores
+        # -----------------------------------------------------------------
+        # O Delta .mode("overwrite") substitui logicamente os dados no _delta_log,
+        # mas NÃO deleta fisicamente os arquivos .parquet antigos do Object Storage.
+        # O script do modelo (pandas) lê via list_objects (todos os .parquet),
+        # ignorando o _delta_log → carrega dados duplicados → OOM.
+        # O VACUUM remove fisicamente os arquivos que não pertencem à versão atual.
+        print(">>> [Vacuum] Removendo parquets orfaos de execucoes anteriores...")
+        try:
+            from delta.tables import DeltaTable
+            spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+            delta_table = DeltaTable.forPath(spark, args.output_path)
+            delta_table.vacuum(retentionHours=0)
+            print(">>> [Vacuum] Concluido — apenas arquivos da versao atual permanecem.")
+        except Exception as e:
+            # Vacuum é best-effort: se falhar, o dedup incremental no modelo cobre
+            print(f">>> [Vacuum] AVISO: falhou ({e}). Dedup incremental no modelo sera usado.")
     else:
         print(">>> [Skip] Salvamento pulado (--skip_save)")
         return df_abt_v6
