@@ -71,7 +71,7 @@ Um sistema de **scoring de crédito** para a Claro que:
 
 ### 1.4 Diagrama de Referência
 
-O diagrama está disponível em: `docs/architecture/diagrams/07.png`
+O diagrama está disponível em: `docs/architecture/11.png` (versão final — inclui VM Airflow, VM-Scoring, gateways corrigidos)
 
 ---
 
@@ -134,11 +134,14 @@ A VCN é dividida em **3 subnets**, cada uma com um propósito específico:
 |-------------|-------|
 | Tipo | **Pública** (acessível pela internet) |
 | CIDR | 10.0.1.0/24 (256 IPs) |
-| Componentes | Load Balancer, NAT Gateway |
+| Componentes | Load Balancer, VM Airflow |
 
 **Por que é pública?**
 - O Load Balancer precisa receber requisições da internet
-- É a "porta de entrada" da nossa aplicação
+- A VM Airflow precisa de IP público para acesso à UI (porta 8080) e SSH
+- É a "porta de entrada" da nossa aplicação e orquestração
+
+> **Nota:** O NAT Gateway **não** fica dentro de nenhuma subnet — é um recurso da VCN (ver seção 4).
 
 #### Private Subnet Compute (10.0.5.0/24)
 
@@ -146,12 +149,14 @@ A VCN é dividida em **3 subnets**, cada uma com um propósito específico:
 |-------------|-------|
 | Tipo | **Privada** (não acessível pela internet) |
 | CIDR | 10.0.5.0/24 (256 IPs) |
-| Componentes | Scoring API |
+| Componentes | Scoring API, VM-Scoring (LightGBM) |
 
 **Por que é privada?**
 - A API contém lógica de negócio sensível
-- Não deve ser acessada diretamente pela internet
-- Só recebe tráfego do Load Balancer
+- A VM-Scoring processa dados de clientes e gera scores de risco
+- Não devem ser acessadas diretamente pela internet
+- O Load Balancer encaminha tráfego para a Scoring API
+- A VM Airflow conecta via SSH interno (VCN) na VM-Scoring
 
 #### Private Subnet Data (10.0.3.0/24)
 
@@ -159,11 +164,12 @@ A VCN é dividida em **3 subnets**, cada uma com um propósito específico:
 |-------------|-------|
 | Tipo | **Privada** |
 | CIDR | 10.0.3.0/24 (256 IPs) |
-| Componentes | Data Flow, Data Science |
+| Componentes | Data Flow (Spark), Data Science (ML Studio — Exploração/EDA) |
 
 **Por que é privada?**
 - Processa dados sensíveis dos clientes
 - Não precisa de acesso externo direto
+- Acessa Object Storage via Service Gateway (rede interna OCI)
 
 **Pergunta comum:** *"Por que separar em várias subnets?"*
 > **Resposta:**
@@ -175,16 +181,50 @@ A VCN é dividida em **3 subnets**, cada uma com um propósito específico:
 
 ## 4. Gateways (Portões de Entrada/Saída)
 
+Os gateways são **recursos da VCN** — não pertencem a nenhuma subnet específica. Eles são como "portas" na parede externa da VCN que controlam diferentes tipos de tráfego. Quem define qual subnet usa qual gateway são as **Route Tables** (tabelas de roteamento).
+
+```
+VCN SQUAD_8 (10.0.0.0/16)
+│
+├── Internet Gateway    → Tráfego bidirecional (IN/OUT) com a internet
+├── NAT Gateway         → Tráfego unidirecional (OUT-only) para a internet
+├── Service Gateway     → Tráfego privado para serviços OCI (Object Storage)
+│
+├── Public Subnet ──── Route Table → Internet Gateway
+├── Private Compute ── Route Table → NAT Gateway + Service Gateway
+└── Private Data ────── Route Table → NAT Gateway + Service Gateway
+```
+
+### Resumo comparativo dos 3 Gateways
+
+| Gateway | Direção | Quem usa | Para quê | Analogia |
+|---------|---------|----------|----------|----------|
+| **Internet Gateway** | ↔ Bidirecional | Public Subnet | Receber/enviar tráfego da internet | Porta da frente do prédio |
+| **NAT Gateway** | → Só saída | Private Subnets | Acessar internet sem ser acessado | Porteiro que deixa sair mas não entrar |
+| **Service Gateway** | ↔ Interno OCI | Todas as Subnets | Acessar Object Storage via rede interna | Corredor interno entre salas |
+
+---
+
 ### 4.1 Internet Gateway
 
 **O que é:**
-- Portão que permite comunicação entre a VCN e a internet
+- Portão que permite comunicação **bidirecional** entre a VCN e a internet
 
 **Função:**
-- Permite que o Load Balancer receba requisições externas
+- Permite que o Load Balancer receba requisições externas (Sistema Claro)
+- Permite acesso à UI do Airflow (porta 8080) e SSH na VM Airflow
 - Sem ele, nada de fora consegue entrar na VCN
 
-**Analogia:** É a porta da frente do prédio.
+**Quem usa no nosso pipeline:**
+
+| Componente | Subnet | Uso |
+|-----------|--------|-----|
+| Load Balancer | Public | Recebe requisições da Scoring API |
+| VM Airflow | Public | Acesso à UI Airflow (porta 8080) + SSH (porta 22) |
+
+**Analogia:** É a porta da frente do prédio — permite entrada e saída.
+
+**Segurança:** Apenas a Public Subnet tem rota para o Internet Gateway. As Private Subnets **nunca** recebem tráfego direto da internet.
 
 ---
 
@@ -194,37 +234,106 @@ A VCN é dividida em **3 subnets**, cada uma com um propósito específico:
 - Network Address Translation Gateway
 
 **Função:**
-- Permite que recursos em subnets **privadas** acessem a internet
-- Mas **não permite** que a internet acesse esses recursos
+- Permite que recursos em subnets **privadas** acessem a internet (saída)
+- Mas **não permite** que a internet acesse esses recursos (entrada bloqueada)
+- Tráfego **unidirecional**: só de dentro para fora
 
-**Exemplo de uso:**
-- Data Flow precisa baixar bibliotecas Python (pip install)
-- Data Science precisa acessar repositórios externos
+**Quem usa no nosso pipeline:**
 
-**Analogia:** É como um porteiro que deixa você sair, mas não deixa estranhos entrarem.
+| Componente | Subnet | Uso | Frequência |
+|-----------|--------|-----|------------|
+| VM-Scoring | Private Compute | `pip install lightgbm`, `yum update` (cloud-init) | Só no setup inicial |
+| Data Flow (Spark) | Private Data | Download de dependências Python durante o run | A cada run |
+| Data Science (ML Studio) | Private Data | `pip install`, `conda install` no notebook | Ad-hoc durante EDA |
+
+**Importante:** O NAT Gateway é usado principalmente no **setup/instalação**. No fluxo operacional do dia a dia (ETL + scoring), o tráfego vai pelo **Service Gateway** (rede interna OCI), não pelo NAT Gateway.
+
+```
+Setup (uma vez):
+  VM-Scoring ──→ NAT Gateway ──→ Internet (pip install lightgbm)
+  Data Flow  ──→ NAT Gateway ──→ Internet (baixar dependências)
+
+Operação (mensal):
+  Data Flow  ──→ Service Gateway ──→ Object Storage (ler/escrever dados)
+  VM-Scoring ──→ Service Gateway ──→ Object Storage (ler ABT, salvar predições)
+```
+
+**Analogia:** É como um porteiro que deixa você sair para comprar material, mas não deixa estranhos entrarem.
 
 **Pergunta comum:** *"Por que não colocar tudo na subnet pública?"*
-> **Resposta:** Segurança. Recursos que não precisam ser acessados externamente devem ficar em subnets privadas. O NAT Gateway permite que eles acessem a internet quando necessário, sem ficarem expostos.
+> **Resposta:** Segurança. Recursos que processam dados sensíveis de clientes (CPF, scores, inadimplência) devem ficar em subnets privadas. O NAT Gateway permite que eles acessem a internet quando necessário (atualizações, dependências), sem ficarem expostos a ataques externos.
 
 ---
 
 ### 4.3 Service Gateway
 
 **O que é:**
-- Conexão privada entre a VCN e serviços da OCI (como Object Storage)
+- Conexão **privada** entre a VCN e serviços da OCI (Object Storage, Container Registry, etc.)
 
 **Função:**
-- Permite que Data Flow e Scoring API acessem o Object Storage
-- O tráfego **não passa pela internet** - fica dentro da rede da OCI
+- Permite que Data Flow, VM-Scoring e Data Science acessem o Object Storage
+- O tráfego **não passa pela internet** — fica dentro da rede interna da OCI
+- É o gateway **mais usado no fluxo operacional** do nosso pipeline
+
+**Quem usa no nosso pipeline:**
+
+| Componente | Subnet | Uso | Frequência |
+|-----------|--------|-----|------------|
+| Data Flow (Spark) | Private Data | Ler/escrever nos buckets (Landing→Bronze→Silver→Gold) | A cada run ETL |
+| VM-Scoring | Private Compute | Ler ABT v6 do bucket Gold, salvar predições/métricas no bucket Models | A cada run do modelo |
+| Data Science (ML Studio) | Private Data | Ler dados do bucket Gold para exploração/EDA | Ad-hoc |
 
 **Vantagens:**
 | Aspecto | Com Service Gateway | Sem Service Gateway |
 |---------|---------------------|---------------------|
-| Velocidade | Mais rápido | Mais lento |
-| Custo | Gratuito | Paga transferência |
-| Segurança | Rede interna | Passa pela internet |
+| Velocidade | Mais rápido (rede interna) | Mais lento (internet) |
+| Custo | Gratuito | Paga transferência de dados |
+| Segurança | Rede privada OCI | Tráfego exposto na internet |
+| Latência | Baixa (~1ms) | Variável (5-50ms) |
 
-**Analogia:** É um corredor interno do prédio que conecta salas sem precisar sair na rua.
+**Analogia:** É um corredor interno do prédio que conecta salas sem precisar sair na rua. Os dados vão do Data Flow para o Object Storage sem nunca sair da rede OCI.
+
+**Pergunta de apresentação:** *"Como a VM-Scoring acessa o Object Storage sem IP público?"*
+> **Resposta:** Via Service Gateway. O tráfego vai pela rede interna da OCI, sem passar pela internet. A VM autentica via Instance Principal (Dynamic Group) e acessa os buckets diretamente. É mais rápido, mais seguro e sem custo de transferência.
+
+---
+
+### 4.4 Diagrama de fluxo dos Gateways
+
+```
+                    ┌─────────────────┐
+                    │    INTERNET     │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              │
+     ┌─────────────┐  ┌───────────┐        │
+     │  Internet   │  │   NAT     │        │
+     │  Gateway    │  │  Gateway  │        │
+     │ (↔ IN/OUT)  │  │ (→ OUT)   │        │
+     └──────┬──────┘  └─────┬─────┘        │
+            │               │              │
+     ┌──────▼──────┐  ┌─────▼──────────┐   │
+     │   Public    │  │ Private Subnets │   │
+     │   Subnet    │  │ (Compute+Data)  │   │
+     │ LB, Airflow │  │ DF, VM-Scoring  │   │
+     └─────────────┘  │ ML Studio       │   │
+                      └─────┬───────────┘   │
+                            │               │
+                      ┌─────▼─────┐         │
+                      │  Service  │         │
+                      │  Gateway  │         │
+                      │ (↔ OCI)   │         │
+                      └─────┬─────┘         │
+                            │               │
+                   ┌────────▼────────┐      │
+                   │ Object Storage  │      │
+                   │ (Buckets OCI)   │      │
+                   │ Landing→...→    │      │
+                   │ Models          │      │
+                   └─────────────────┘      │
+```
 
 ---
 
@@ -749,7 +858,7 @@ Modelo foi treinado pelo batch anterior ─────────────�
 | Arquitetura OCI Base | `docs/architecture/OCI_ARCHITECTURE.md` | Detalhes técnicos de cada recurso |
 | **Cenários Operacionais** | `docs/architecture/OCI_OPERACIONAL.md` | **API 24/7, Batch mensal, deploy do modelo** |
 | Terraform + Airflow | `docs/architecture/OCI_TERRAFORM_AIRFLOW.md` | Código de infraestrutura |
-| Diagrama | `docs/architecture/diagrams/07.png` | Versão final do diagrama |
+| Diagrama | `docs/architecture/11.png` | Versão final do diagrama (VM Airflow, VM-Scoring, gateways) |
 | Variable Book | `docs/04_gold_rules/BOOK_VARIABLES_ABT_V6.md` | Dicionário de variáveis |
 | Target Definition | `docs/00_project/target_definition.md` | Definição do FPD e regras |
 

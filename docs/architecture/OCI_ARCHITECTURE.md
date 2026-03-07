@@ -625,9 +625,11 @@ oci network vcn create \
 
 | Subnet | CIDR | Tipo | Uso |
 |--------|------|------|-----|
-| public-subnet | 10.0.1.0/24 | Public | LB, NAT Gateway, Bastion |
-| private-data-subnet | 10.0.10.0/24 | Private | Data Flow, Data Science |
-| private-compute-subnet | 10.0.20.0/24 | Private | VMs, Scoring API |
+| public-subnet | 10.0.1.0/24 | Public | Load Balancer, VM Airflow |
+| private-data-subnet | 10.0.3.0/24 | Private | Data Flow (Spark), Data Science (ML Studio — Exploração/EDA) |
+| private-compute-subnet | 10.0.5.0/24 | Private | Scoring API, VM-Scoring (LightGBM) |
+
+> **Nota:** Gateways (Internet, NAT, Service) são recursos da **VCN**, não pertencem a nenhuma subnet. Quem define qual subnet usa qual gateway são as Route Tables.
 
 ```bash
 # Criar subnet pública
