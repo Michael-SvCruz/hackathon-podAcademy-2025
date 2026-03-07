@@ -1,0 +1,23 @@
+# .gitattributes
+# Garante line endings corretos independente do SO do desenvolvedor.
+# Evita erro "required file not found" no WSL ao executar scripts bash.
+
+# Shell scripts: sempre LF (Unix) — CRLF quebra o shebang no WSL/Linux
+*.sh    text eol=lf
+
+# Python: LF (padrão Linux/OCI Data Flow)
+*.py    text eol=lf
+
+# Terraform: LF
+*.tf    text eol=lf
+*.tfvars text eol=lf
+
+# Markdown e JSON: auto (git decide, sem forçar)
+*.md    text
+*.json  text
+
+# Binários: nunca converter
+*.zip   binary
+*.pem   binary
+*.png   binary
+*.pdf   binary

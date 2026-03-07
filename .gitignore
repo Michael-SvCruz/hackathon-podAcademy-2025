@@ -207,11 +207,10 @@ marimo/_lsp/
 __marimo__/
 
 .github/copilot-instructions.md
-<<<<<<< HEAD
-=======
 
->>>>>>> 12b9f0de0a263099b5b0b33f0b20af0346d70607
 informacoes_adicionais/
+
+mig_oci/data_science/
 
 docs/00_execution_outputs_reports/
 
