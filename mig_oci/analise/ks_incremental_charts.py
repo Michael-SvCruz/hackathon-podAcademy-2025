@@ -349,39 +349,51 @@ def chart_resumo_final():
 
 
 # ============================================================================
-# GRÁFICO 5: Features por Bloco (pizza/donut)
+# GRÁFICO 5: Features por Bloco (barras horizontais)
 # ============================================================================
 
 def chart_features_por_bloco():
-    """Donut chart mostrando composição de features do modelo final (261 features, OCI VM).
+    """Barras horizontais mostrando composição de features do modelo final (261 features, OCI VM).
 
     Breakdown estimado a partir do KS incremental:
     - Scores: 2 (Score_01 + Score_02, sempre selecionados)
-    - Telco: ~87 (v3 tem 89 features; 89 - 2 scores = 87)
     - Cadastro: ~6 (v4 tem 95; 95 - 89 = 6 novas)
     - Recarga: ~65 (v5 tem 160; 160 - 95 = 65 novas)
+    - Telco: ~87 (v3 tem 89 features; 89 - 2 scores = 87)
     - Pag. + Atraso: ~101 (v6 tem 261; 261 - 160 = 101 novas)
     Total: 2 + 87 + 6 + 65 + 101 = 261
     """
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
-    blocos = ["Scores\n(2)", "Telco\n(87)", "Cadastro\n(6)", "Recarga\n(65)", "Pag. + Atraso\n(101)"]
-    sizes = [2, 87, 6, 65, 101]
-    colors_pie = ["#1A4B8C", "#2166AC", "#4393C3", "#74ADD1", "#C74634"]
-    explode = [0, 0, 0, 0.05, 0.05]  # destacar Recarga e Pag+Atraso
+    # Ordenado por quantidade (menor → maior, de baixo para cima)
+    blocos = ["Scores", "Cadastro", "Recarga", "Telco", "Pag. + Atraso"]
+    sizes = [2, 6, 65, 87, 101]
+    total = sum(sizes)
+    colors_bar = ["#1A4B8C", "#4393C3", "#74ADD1", "#2166AC", "#C74634"]
 
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=blocos, colors=colors_pie, autopct="%1.0f%%",
-        startangle=90, explode=explode, pctdistance=0.75,
-        wedgeprops=dict(width=0.4, edgecolor="white", linewidth=2),
-        textprops=dict(fontsize=11),
-    )
+    y = np.arange(len(blocos))
+    bars = ax.barh(y, sizes, height=0.55, color=colors_bar, edgecolor="white", linewidth=1.5, zorder=3)
 
-    for autotext in autotexts:
-        autotext.set_fontsize(10)
-        autotext.set_fontweight("bold")
+    # Valores nas barras
+    for bar, val in zip(bars, sizes):
+        pct = val / total * 100
+        # Label dentro se barra larga, fora se estreita
+        if val >= 20:
+            ax.text(bar.get_width() - 2, bar.get_y() + bar.get_height() / 2,
+                    f"{val}  ({pct:.0f}%)", ha="right", va="center",
+                    fontsize=12, fontweight="bold", color="white")
+        else:
+            ax.text(bar.get_width() + 1.5, bar.get_y() + bar.get_height() / 2,
+                    f"{val}  ({pct:.0f}%)", ha="left", va="center",
+                    fontsize=12, fontweight="bold", color=COLORS["secondary"])
 
-    ax.set_title(f"Distribuição de Features por Bloco\n(261 features, IV >= 0.01 — OCI VM)", fontsize=16, fontweight="bold", pad=20)
+    ax.set_yticks(y)
+    ax.set_yticklabels(blocos, fontsize=13)
+    ax.set_xlabel("Quantidade de Features", fontsize=14)
+    ax.set_title("Features Selecionadas por Bloco\n(261 features, IV >= 0.01 — OCI VM)",
+                 fontsize=16, fontweight="bold", pad=15)
+    ax.set_xlim(0, 120)
+    ax.grid(axis="y", visible=False)
 
     fig.tight_layout()
     return fig

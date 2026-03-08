@@ -79,7 +79,7 @@
       "Total": 1450
     },
     "OCI": {
-      "Data Flow (3 runs)": 240,
+      "Data Flow (3×21 apps)": 240,
       "Storage (295 GB)": 10,
       "Airflow VM (E3.Flex)": 60,
       "Modelo VM (E5.Flex)": 40,
