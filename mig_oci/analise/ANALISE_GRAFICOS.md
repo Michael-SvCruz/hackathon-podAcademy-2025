@@ -1,14 +1,15 @@
 # Análise de Gráficos — Apresentação Final
 
-Documentação detalhada dos 10 gráficos gerados para a apresentação final do Hackathon PodAcademy 2025.
+Documentação detalhada dos 15 gráficos gerados para a apresentação final do Hackathon PodAcademy 2025.
 
 ## Índice
 
 1. [Gráficos 01-05: KS Incremental e Modelo](#gráficos-01-05-ks-incremental-e-modelo)
 2. [Gráficos 06-10: Comparação Databricks vs OCI](#gráficos-06-10-comparação-databricks-vs-oci)
-3. [Dados e Metodologia](#dados-e-metodologia)
-4. [Interpretação dos Resultados](#interpretação-dos-resultados)
-5. [Sugestão de Ordem para Apresentação](#sugestão-de-ordem-para-apresentação)
+3. [Gráficos 11-15: Swap-in / Swap-out](#gráficos-11-15-swap-in--swap-out)
+4. [Dados e Metodologia](#dados-e-metodologia)
+5. [Interpretação dos Resultados](#interpretação-dos-resultados)
+6. [Sugestão de Ordem para Apresentação](#sugestão-de-ordem-para-apresentação)
 
 ---
 
@@ -150,6 +151,44 @@ Script: `comparacao_databricks_oci.py`
 
 ---
 
+## Gráficos 11-15: Swap-in / Swap-out
+
+Script: `Swap-in_Swap-out/swap_charts.py` | Documentação detalhada: [`Swap-in_Swap-out/ANALISE_SWAP.md`](Swap-in_Swap-out/ANALISE_SWAP.md)
+
+**Conceito:** Compara as decisões do modelo antigo (Score_01) vs modelo novo (LightGBM) na mesma população OOT (851,616 clientes), quantificando o impacto prático da substituição.
+
+### 11 — Decil Comparativo (Score_01 vs LightGBM)
+
+![11](Swap-in_Swap-out/output/11_decil_comparativo.png)
+
+**O que mostra:** Taxa FPD por decil de risco. LightGBM separa 10x (5.1% vs 52.9%) enquanto Score_01 separa apenas 5x (7.5% vs 40.9%). KS Score_01: 26.71% vs KS LightGBM: 34.42%.
+
+### 12 — Matriz de Swap (80% de aprovação)
+
+![12](Swap-in_Swap-out/output/12_matriz_swap.png)
+
+**O que mostra:** Matriz 2×2 com volume e FPD por célula. 138K clientes (16.3%) mudariam de decisão. Swap-out captura 69K maus (FPD 41.8%), Swap-in recupera 69K bons (FPD 23.6%). FPD entre aprovados cai de 17.12% → 15.26%.
+
+### 13 — FPD entre Aprovados por Taxa de Aprovação
+
+![13](Swap-in_Swap-out/output/13_fpd_por_taxa.png)
+
+**O que mostra:** O LightGBM é consistentemente melhor em todas as taxas (70-90%). Maior ganho na taxa 70% (-13.6%), menor na taxa 90% (-7.2%). A área verde representa a redução de inadimplência.
+
+### 14 — Volume de Swap por Taxa de Aprovação
+
+![14](Swap-in_Swap-out/output/14_swap_volume.png)
+
+**O que mostra:** Volume de clientes em Swap-out (maus capturados) e Swap-in (bons recuperados) para cada taxa. FPD do Swap-out cresce de 35% a 51% conforme a taxa aumenta.
+
+### 15 — Resumo do Ganho: Redução de FPD
+
+![15](Swap-in_Swap-out/output/15_resumo_ganho.png)
+
+**O que mostra:** Barras horizontais com a redução relativa de FPD. Na taxa 70%: -13.6% (15.40% → 13.30%). Na taxa 80%: -10.8% (17.12% → 15.26%).
+
+---
+
 ## Dados e Metodologia
 
 ### Fonte: KS Incremental OCI VM
@@ -204,13 +243,17 @@ Features de Recarga, Pagamento e Atraso têm IV individual baixo (0.01-0.04), ma
 2. **Gráfico 03** — Waterfall (contribuição isolada de cada bloco)
 3. **Gráfico 02** — Logística vs LightGBM (justifica escolha do algoritmo)
 
-### Bloco 2 — Migração OCI (slides 4-6)
-4. **Gráfico 06** — KS Databricks vs OCI (lado a lado)
-5. **Gráfico 07** — Métricas comparativas (4 painéis)
-6. **Gráfico 10** — Timeline da migração (8 fases, 30 dias)
+### Bloco 2 — Valor de Negócio: Swap Analysis (slides 4-6)
+4. **Gráfico 11** — Decil Comparativo (superioridade do ranking do LightGBM)
+5. **Gráfico 12** — Matriz de Swap a 80% (impacto prático quantificado)
+6. **Gráfico 13** — FPD por Taxa (ganho consistente em qualquer cenário)
 
-### Bloco 3 — Resultado Final (slides 7-9)
-7. **Gráfico 08** — Custos (-76%)
-8. **Gráfico 05** — Features por bloco (composição do modelo)
-9. **Gráfico 09** — Cards de ganhos (slide de conclusão)
-10. **Gráfico 04** — Resumo final vs benchmark (slide de fechamento)
+### Bloco 3 — Migração OCI (slides 7-9)
+7. **Gráfico 06** — KS Databricks vs OCI (lado a lado)
+8. **Gráfico 10** — Timeline da migração (8 fases, 30 dias)
+9. **Gráfico 08** — Custos (-76%)
+
+### Bloco 4 — Resultado Final (slides 10-12)
+10. **Gráfico 15** — Resumo do Ganho: Redução de FPD (impacto do swap)
+11. **Gráfico 09** — Cards de ganhos da migração (slide de conclusão)
+12. **Gráfico 04** — Resumo final vs benchmark (slide de fechamento)

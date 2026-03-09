@@ -151,18 +151,18 @@ def chart_ks_incremental():
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
                 f"{val:.2f}%", ha="center", va="bottom", fontsize=13, fontweight="bold", color=COLORS["secondary"])
 
-    # Delta annotations
+    # Delta annotations (zorder=5 para ficar NA FRENTE da linha)
     for i in range(1, n):
         delta = ks_values[i] - ks_values[i - 1]
         y_mid = (ks_values[i] + ks_values[i - 1]) / 2
         ax.annotate(f"+{delta:.2f}",
                     xy=(i - 0.5, y_mid), fontsize=10, color=COLORS["green"],
-                    fontweight="bold", ha="center", va="center",
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#E8F5E9", edgecolor=COLORS["green"], alpha=0.8))
+                    fontweight="bold", ha="center", va="center", zorder=6,
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#E8F5E9", edgecolor=COLORS["green"], alpha=0.9))
 
-    # Número de features embaixo de cada label
+    # Número de features embaixo de cada label (cor preta para melhor visibilidade)
     for i, nf in enumerate(n_features):
-        ax.text(i, 22.8, f"({nf} feat.)", ha="center", va="top", fontsize=9, color="gray", style="italic")
+        ax.text(i, 22.8, f"({nf} feat.)", ha="center", va="top", fontsize=9, color="black", style="italic")
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=12)
@@ -171,9 +171,9 @@ def chart_ks_incremental():
     ax.set_ylim(22, 38)
     ax.legend(loc="upper left", fontsize=12, framealpha=0.9)
 
-    # Nota: todos valores exatos
-    ax.text(0.98, 0.02, "Valores exatos — treinamento independente por ABT na OCI VM (2026-03-07)",
-            transform=ax.transAxes, fontsize=9, ha="right", va="bottom",
+    # Nota: todos valores exatos (posicionada no topo direito para não sobrepor labels)
+    ax.text(0.98, 0.97, "Valores exatos — treinamento independente por ABT na OCI VM (2026-03-07)",
+            transform=ax.transAxes, fontsize=9, ha="right", va="top",
             style="italic", color="gray")
 
     fig.tight_layout()
