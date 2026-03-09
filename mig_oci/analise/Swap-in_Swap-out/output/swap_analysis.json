@@ -1,0 +1,411 @@
+{
+  "timestamp": "20260308_1644",
+  "n_oot": 851616,
+  "safras": [
+    "202502",
+    "202503"
+  ],
+  "ks_score01": 0.267116,
+  "ks_lgbm": 0.344151,
+  "decil_lgbm": [
+    {
+      "decil": 1,
+      "qtd": 85162,
+      "n_fpd": 4353.0,
+      "taxa_fpd": 0.05111434683203697,
+      "score_min": 0.005168917580324905,
+      "score_max": 0.06021190631445965,
+      "score_medio": 0.045797024507354386,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 5.110000133514404,
+      "fpd_acum": 2.4000000953674316
+    },
+    {
+      "decil": 2,
+      "qtd": 85162,
+      "n_fpd": 6861.0,
+      "taxa_fpd": 0.08056410402059555,
+      "score_min": 0.060212284528361,
+      "score_max": 0.08061222968824655,
+      "score_medio": 0.07053197734507644,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 8.0600004196167,
+      "fpd_acum": 6.199999809265137
+    },
+    {
+      "decil": 3,
+      "qtd": 85161,
+      "n_fpd": 8517.0,
+      "taxa_fpd": 0.10001056641340256,
+      "score_min": 0.0806127768225619,
+      "score_max": 0.10307476836892729,
+      "score_medio": 0.09147405803042147,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 10.0,
+      "fpd_acum": 10.899999618530273
+    },
+    {
+      "decil": 4,
+      "qtd": 85162,
+      "n_fpd": 10469.0,
+      "taxa_fpd": 0.12293041497468948,
+      "score_min": 0.1030749713166572,
+      "score_max": 0.13121061093850356,
+      "score_medio": 0.11666814818058335,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 12.289999961853027,
+      "fpd_acum": 16.700000762939453
+    },
+    {
+      "decil": 5,
+      "qtd": 85161,
+      "n_fpd": 13113.0,
+      "taxa_fpd": 0.15397892892360687,
+      "score_min": 0.1312106909993701,
+      "score_max": 0.16507880850796045,
+      "score_medio": 0.1476951798566213,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 15.399999618530273,
+      "fpd_acum": 24.0
+    },
+    {
+      "decil": 6,
+      "qtd": 85162,
+      "n_fpd": 16165.0,
+      "taxa_fpd": 0.1898147016763687,
+      "score_min": 0.16507943251221022,
+      "score_max": 0.20588857796854682,
+      "score_medio": 0.18493249061402325,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 18.979999542236328,
+      "fpd_acum": 32.900001525878906
+    },
+    {
+      "decil": 7,
+      "qtd": 85161,
+      "n_fpd": 19825.0,
+      "taxa_fpd": 0.2327943593263626,
+      "score_min": 0.2058895355832243,
+      "score_max": 0.2568675884236304,
+      "score_medio": 0.2302977768405948,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 23.280000686645508,
+      "fpd_acum": 43.900001525878906
+    },
+    {
+      "decil": 8,
+      "qtd": 85162,
+      "n_fpd": 24691.0,
+      "taxa_fpd": 0.2899297773838043,
+      "score_min": 0.25686795529157863,
+      "score_max": 0.32534080246875713,
+      "score_medio": 0.2892589486812789,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 28.989999771118164,
+      "fpd_acum": 57.5
+    },
+    {
+      "decil": 9,
+      "qtd": 85161,
+      "n_fpd": 31743.0,
+      "taxa_fpd": 0.37274104356765747,
+      "score_min": 0.3253423415088792,
+      "score_max": 0.42645273256272853,
+      "score_medio": 0.37151083359864484,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 37.27000045776367,
+      "fpd_acum": 75.0999984741211
+    },
+    {
+      "decil": 10,
+      "qtd": 85162,
+      "n_fpd": 45015.0,
+      "taxa_fpd": 0.5285808444023132,
+      "score_min": 0.4264571710542438,
+      "score_max": 0.9644152313985039,
+      "score_medio": 0.5343919371565793,
+      "pct_pop": 10.0,
+      "taxa_fpd_pct": 52.86000061035156,
+      "fpd_acum": 100.0
+    }
+  ],
+  "decil_score01": [
+    {
+      "decil": 1,
+      "qtd": 88824,
+      "n_fpd": 36364.0,
+      "taxa_fpd": 0.409393846988678,
+      "score_min": 2.0,
+      "score_max": 531.0,
+      "score_medio": 503.83721923828125,
+      "pct_pop": 10.4,
+      "taxa_fpd_pct": 40.939998626708984,
+      "fpd_acum": 20.100000381469727
+    },
+    {
+      "decil": 2,
+      "qtd": 89107,
+      "n_fpd": 30141.0,
+      "taxa_fpd": 0.33825623989105225,
+      "score_min": 532.0,
+      "score_max": 553.0,
+      "score_medio": 543.7942504882812,
+      "pct_pop": 10.5,
+      "taxa_fpd_pct": 33.83000183105469,
+      "fpd_acum": 36.79999923706055
+    },
+    {
+      "decil": 3,
+      "qtd": 80264,
+      "n_fpd": 23334.0,
+      "taxa_fpd": 0.29071563482284546,
+      "score_min": 554.0,
+      "score_max": 569.0,
+      "score_medio": 561.761962890625,
+      "pct_pop": 9.4,
+      "taxa_fpd_pct": 29.06999969482422,
+      "fpd_acum": 49.70000076293945
+    },
+    {
+      "decil": 4,
+      "qtd": 84096,
+      "n_fpd": 20606.0,
+      "taxa_fpd": 0.2450294941663742,
+      "score_min": 570.0,
+      "score_max": 582.0,
+      "score_medio": 575.865966796875,
+      "pct_pop": 9.9,
+      "taxa_fpd_pct": 24.5,
+      "fpd_acum": 61.099998474121094
+    },
+    {
+      "decil": 5,
+      "qtd": 88659,
+      "n_fpd": 18204.0,
+      "taxa_fpd": 0.20532602071762085,
+      "score_min": 583.0,
+      "score_max": 595.0,
+      "score_medio": 589.2596435546875,
+      "pct_pop": 10.4,
+      "taxa_fpd_pct": 20.530000686645508,
+      "fpd_acum": 71.19999694824219
+    },
+    {
+      "decil": 6,
+      "qtd": 83674,
+      "n_fpd": 14417.0,
+      "taxa_fpd": 0.17229963839054108,
+      "score_min": 596.0,
+      "score_max": 607.0,
+      "score_medio": 601.39697265625,
+      "pct_pop": 9.8,
+      "taxa_fpd_pct": 17.229999542236328,
+      "fpd_acum": 79.19999694824219
+    },
+    {
+      "decil": 7,
+      "qtd": 82145,
+      "n_fpd": 11793.0,
+      "taxa_fpd": 0.14356321096420288,
+      "score_min": 608.0,
+      "score_max": 619.0,
+      "score_medio": 613.3748779296875,
+      "pct_pop": 9.6,
+      "taxa_fpd_pct": 14.359999656677246,
+      "fpd_acum": 85.69999694824219
+    },
+    {
+      "decil": 8,
+      "qtd": 85917,
+      "n_fpd": 10684.0,
+      "taxa_fpd": 0.12435257434844971,
+      "score_min": 620.0,
+      "score_max": 636.0,
+      "score_medio": 627.2686157226562,
+      "pct_pop": 10.1,
+      "taxa_fpd_pct": 12.4399995803833,
+      "fpd_acum": 91.5999984741211
+    },
+    {
+      "decil": 9,
+      "qtd": 84248,
+      "n_fpd": 8853.0,
+      "taxa_fpd": 0.10508261620998383,
+      "score_min": 637.0,
+      "score_max": 656.0,
+      "score_medio": 644.7503662109375,
+      "pct_pop": 9.9,
+      "taxa_fpd_pct": 10.510000228881836,
+      "fpd_acum": 96.5
+    },
+    {
+      "decil": 10,
+      "qtd": 84682,
+      "n_fpd": 6356.0,
+      "taxa_fpd": 0.07505727559328079,
+      "score_min": 657.0,
+      "score_max": 771.0,
+      "score_medio": 679.27587890625,
+      "pct_pop": 9.9,
+      "taxa_fpd_pct": 7.510000228881836,
+      "fpd_acum": 100.0
+    }
+  ],
+  "swap_analysis": [
+    {
+      "approval_rate": 0.7,
+      "n_total": 851616,
+      "n_approved_old": 597830,
+      "n_approved_new": 596131,
+      "threshold_old": 569.0,
+      "threshold_new": 0.256868,
+      "A_acordo_aprovam": {
+        "n": 518086,
+        "n_fpd": 64209,
+        "taxa_fpd": 0.123935
+      },
+      "B_swap_out": {
+        "n": 79744,
+        "n_fpd": 27882,
+        "taxa_fpd": 0.349644
+      },
+      "C_swap_in": {
+        "n": 78045,
+        "n_fpd": 15094,
+        "taxa_fpd": 0.193401
+      },
+      "D_acordo_rejeitam": {
+        "n": 175741,
+        "n_fpd": 73567,
+        "taxa_fpd": 0.41861
+      },
+      "fpd_aprovados_modelo_antigo": 0.154042,
+      "fpd_aprovados_modelo_novo": 0.133029,
+      "reducao_fpd_pct": 13.64
+    },
+    {
+      "approval_rate": 0.75,
+      "n_total": 851616,
+      "n_approved_old": 647999,
+      "n_approved_new": 638712,
+      "threshold_old": 560.0,
+      "threshold_new": 0.288283,
+      "A_acordo_aprovam": {
+        "n": 568774,
+        "n_fpd": 76149,
+        "taxa_fpd": 0.133883
+      },
+      "B_swap_out": {
+        "n": 79225,
+        "n_fpd": 30230,
+        "taxa_fpd": 0.381571
+      },
+      "C_swap_in": {
+        "n": 69938,
+        "n_fpd": 14908,
+        "taxa_fpd": 0.21316
+      },
+      "D_acordo_rejeitam": {
+        "n": 133679,
+        "n_fpd": 59465,
+        "taxa_fpd": 0.444834
+      },
+      "fpd_aprovados_modelo_antigo": 0.164165,
+      "fpd_aprovados_modelo_novo": 0.142563,
+      "reducao_fpd_pct": 13.16
+    },
+    {
+      "approval_rate": 0.8,
+      "n_total": 851616,
+      "n_approved_old": 681876,
+      "n_approved_new": 681293,
+      "threshold_old": 553.0,
+      "threshold_new": 0.325341,
+      "A_acordo_aprovam": {
+        "n": 612371,
+        "n_fpd": 87730,
+        "taxa_fpd": 0.143263
+      },
+      "B_swap_out": {
+        "n": 69505,
+        "n_fpd": 29025,
+        "taxa_fpd": 0.417596
+      },
+      "C_swap_in": {
+        "n": 68922,
+        "n_fpd": 16264,
+        "taxa_fpd": 0.235977
+      },
+      "D_acordo_rejeitam": {
+        "n": 100818,
+        "n_fpd": 47733,
+        "taxa_fpd": 0.473457
+      },
+      "fpd_aprovados_modelo_antigo": 0.171226,
+      "fpd_aprovados_modelo_novo": 0.152642,
+      "reducao_fpd_pct": 10.85
+    },
+    {
+      "approval_rate": 0.85,
+      "n_total": 851616,
+      "n_approved_old": 728854,
+      "n_approved_new": 723873,
+      "threshold_old": 543.0,
+      "threshold_new": 0.369332,
+      "A_acordo_aprovam": {
+        "n": 667669,
+        "n_fpd": 104130,
+        "taxa_fpd": 0.155961
+      },
+      "B_swap_out": {
+        "n": 61185,
+        "n_fpd": 28062,
+        "taxa_fpd": 0.458642
+      },
+      "C_swap_in": {
+        "n": 56204,
+        "n_fpd": 14703,
+        "taxa_fpd": 0.261601
+      },
+      "D_acordo_rejeitam": {
+        "n": 66558,
+        "n_fpd": 33857,
+        "taxa_fpd": 0.508684
+      },
+      "fpd_aprovados_modelo_antigo": 0.18137,
+      "fpd_aprovados_modelo_novo": 0.164163,
+      "reducao_fpd_pct": 9.49
+    },
+    {
+      "approval_rate": 0.9,
+      "n_total": 851616,
+      "n_approved_old": 769410,
+      "n_approved_new": 766454,
+      "threshold_old": 531.0,
+      "threshold_new": 0.426455,
+      "A_acordo_aprovam": {
+        "n": 722814,
+        "n_fpd": 123065,
+        "taxa_fpd": 0.170258
+      },
+      "B_swap_out": {
+        "n": 46596,
+        "n_fpd": 23768,
+        "taxa_fpd": 0.510087
+      },
+      "C_swap_in": {
+        "n": 43640,
+        "n_fpd": 12672,
+        "taxa_fpd": 0.290376
+      },
+      "D_acordo_rejeitam": {
+        "n": 38566,
+        "n_fpd": 21247,
+        "taxa_fpd": 0.550926
+      },
+      "fpd_aprovados_modelo_antigo": 0.190838,
+      "fpd_aprovados_modelo_novo": 0.177097,
+      "reducao_fpd_pct": 7.2
+    }
+  ]
+}
