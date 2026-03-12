@@ -276,16 +276,6 @@ Sem custo direto, mas essencial para a arquitetura de segurança.
 | **TOTAL (atual)** | | | **R$ 105,00** |
 | **TOTAL (com margem 350GB)** | | | **R$ 150,00** |
 
-### Comparativo com Databricks
-
-| Item | OCI (este projeto) | Databricks (estimado) |
-|------|-------------------|----------------------|
-| Plataforma / Processamento | R$ _______ | ~R$1.200 (DBUs + clusters) |
-| Storage | R$ _______ | ~R$50 |
-| Orquestração | R$ _______ | ~R$200 (Workflows) |
-| **Total mensal** | **R$ _______** | **~R$1.450** |
-| **Economia** | | **R$ _______ (___%)** |
-
 ---
 
 ## 9. Referências Terraform
