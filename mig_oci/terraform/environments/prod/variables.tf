@@ -145,12 +145,16 @@ variable "dataflow_applications" {
     # ============================================================
 
     bronze-bureau = {
-      display_name   = "bronze-bureau"
-      script_name    = "bronze_bureau.py"
-      driver_shape   = "VM.Standard2.1"
-      executor_shape = "VM.Standard2.1"
-      min_executors  = 2
-      max_executors  = 8
+      display_name    = "bronze-bureau"
+      script_name     = "bronze_bureau.py"
+      driver_shape    = "VM.Standard.E5.Flex"
+      executor_shape  = "VM.Standard.E5.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
     }
 
     bronze-telco = {
@@ -180,8 +184,8 @@ variable "dataflow_applications" {
       script_name     = "bronze_atraso.py"
       driver_shape    = "VM.Standard3.Flex"
       executor_shape  = "VM.Standard3.Flex"
-      driver_ocpus    = 1
-      driver_memory   = 8
+      driver_ocpus    = 2
+      driver_memory   = 16
       executor_ocpus  = 2
       executor_memory = 32
       min_executors   = 2
@@ -193,10 +197,10 @@ variable "dataflow_applications" {
       script_name     = "bronze_pagamento.py"
       driver_shape    = "VM.Standard.E3.Flex"
       executor_shape  = "VM.Standard.E3.Flex"
-      driver_ocpus    = 1
-      driver_memory   = 8
+      driver_ocpus    = 2
+      driver_memory   = 16
       executor_ocpus  = 2
-      executor_memory = 16
+      executor_memory = 32
       min_executors   = 2
       max_executors   = 8
     }
@@ -206,8 +210,8 @@ variable "dataflow_applications" {
       script_name     = "bronze_recarga.py"
       driver_shape    = "VM.Standard.E4.Flex"
       executor_shape  = "VM.Standard.E4.Flex"
-      driver_ocpus    = 1
-      driver_memory   = 8
+      driver_ocpus    = 2
+      driver_memory   = 16
       executor_ocpus  = 2
       executor_memory = 32
       min_executors   = 2
@@ -221,12 +225,16 @@ variable "dataflow_applications" {
     # ============================================================
 
     silver-bureau = {
-      display_name   = "silver-bureau"
-      script_name    = "silver_bureau.py"
-      driver_shape   = "VM.Standard2.1"
-      executor_shape = "VM.Standard2.1"
-      min_executors  = 2
-      max_executors  = 8
+      display_name    = "silver-bureau"
+      script_name     = "silver_bureau.py"
+      driver_shape    = "VM.Standard.E5.Flex"
+      executor_shape  = "VM.Standard.E5.Flex"
+      driver_ocpus    = 2
+      driver_memory   = 16
+      executor_ocpus  = 2
+      executor_memory = 32
+      min_executors   = 2
+      max_executors   = 8
     }
 
     silver-telco = {
@@ -256,8 +264,8 @@ variable "dataflow_applications" {
       script_name     = "silver_recarga.py"
       driver_shape    = "VM.Standard.E4.Flex"
       executor_shape  = "VM.Standard.E4.Flex"
-      driver_ocpus    = 1
-      driver_memory   = 8
+      driver_ocpus    = 2
+      driver_memory   = 16
       executor_ocpus  = 2
       executor_memory = 32
       min_executors   = 2
@@ -269,10 +277,10 @@ variable "dataflow_applications" {
       script_name     = "silver_pagamento.py"
       driver_shape    = "VM.Standard.E3.Flex"
       executor_shape  = "VM.Standard.E3.Flex"
-      driver_ocpus    = 1
-      driver_memory   = 8
+      driver_ocpus    = 2
+      driver_memory   = 16
       executor_ocpus  = 2
-      executor_memory = 16
+      executor_memory = 32
       min_executors   = 2
       max_executors   = 8
     }
@@ -282,8 +290,8 @@ variable "dataflow_applications" {
       script_name     = "silver_atraso.py"
       driver_shape    = "VM.Standard3.Flex"
       executor_shape  = "VM.Standard3.Flex"
-      driver_ocpus    = 1
-      driver_memory   = 8
+      driver_ocpus    = 2
+      driver_memory   = 16
       executor_ocpus  = 2
       executor_memory = 32
       min_executors   = 2

@@ -28,7 +28,7 @@ terraform {
 # Estratégia de shapes: apps em grupos paralelos usam famílias de shapes
 # diferentes para evitar competição de quota no OCI free tier.
 # Shapes fixos: VM.Standard2.1, VM.Standard2.2 (sem shape_config)
-# Shapes Flex: E3, E4, Standard3, A1 (com shape_config: ocpus + memory)
+# Shapes Flex: E3, E4, E5, Standard3, A1 (com shape_config: ocpus + memory)
 
 
 # ============================================
@@ -46,7 +46,7 @@ resource "oci_dataflow_application" "apps" {
   # Driver shape (per-app)
   driver_shape = each.value.driver_shape
 
-  # Driver shape config — apenas para shapes Flex (E3, E4, Standard3, A1)
+  # Driver shape config — apenas para shapes Flex (E3, E4, E5, Standard3, A1)
   dynamic "driver_shape_config" {
     for_each = each.value.driver_ocpus != null ? [1] : []
     content {
