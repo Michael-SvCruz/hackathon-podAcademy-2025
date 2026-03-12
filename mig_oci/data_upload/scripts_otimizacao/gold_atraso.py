@@ -1,0 +1,461 @@
+# Arquivo: mig_oci/data_upload/scripts/gold_atraso.py
+# Adaptado de src/jobs/02_gold/gold_atraso_features_v2.py para OCI Data Flow
+# Mudancas: paths OCI, imports flat, sem saveAsTable
+"""
+================================================================================
+PROJETO HACKATHON 2025 - ENGENHARIA DE DADOS
+SCRIPT: gold_atraso.py (OCI Data Flow)
+OBJETIVO: Gerar features comportamentais de Atraso para ABT v6
+================================================================================
+
+DESCRICAO TECNICA:
+Este script processa dados de Atraso da Silver e gera features comportamentais
+agregadas por cliente-mes para modelagem de risco de credito.
+
+A base de Atraso e um SNAPSHOT MENSAL (sempre dia 01) que mostra o estado das
+faturas em aberto, aging, write-offs, provisoes, etc.
+
+================================================================================
+ARQUITETURA:
+================================================================================
+
+    SILVER (atraso_silver_delta)
+         | Snapshot mensal: estado das faturas/conta
+         | Grao: multiplas linhas por CPF (faturas em diferentes estados)
+         |
+         v
+    +------------------------------------------------------------+
+    |             GOLD ATRASO FEATURES V2 (este script)          |
+    |                                                            |
+    |  1. Metricas de faturas abertas                            |
+    |  2. Distribuicao de aging (0-30, 31-60, 61-90, 90+)       |
+    |  3. Indicadores de risco (WO, PDD, Fraude)                 |
+    |  4. Indicadores de recuperacao (ACA, PCCR)                 |
+    |  5. Valores em aberto e pagamentos                         |
+    |                                                            |
+    +------------------------------------------------------------+
+         |
+         | Grao: 1 linha por NUM_CPF + SAFRA_ATRASO
+         v
+    GOLD (atraso_features_v2_delta)
+
+================================================================================
+"""
+
+import sys
+import argparse
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+# Namespace OCI (passado como argumento)
+namespace = sys.argv[1] if len(sys.argv) > 1 else "default_namespace"
+
+# No OCI Data Flow, a SparkSession já vem pré-configurada pelo serviço:
+# - Delta Lake (via configuration{} do Terraform)
+# - Autenticação OCI (Resource Principal automático)
+
+# =============================================================================
+# CONFIGURACAO
+# =============================================================================
+DEFAULT_SILVER_ATRASO_PATH = f"oci://hackathon-2025-silver-layer@{namespace}/atraso/"
+DEFAULT_OUTPUT_PATH = f"oci://hackathon-2025-gold-layer@{namespace}/gold_atraso_features/"
+DEFAULT_FORMAT = "delta"
+GOLD_VERSION = "gold_atraso_features_v2"
+
+# --- Otimizacao small files ---
+BYTES_PER_ROW_ESTIMATE = 120   # ~120 bytes/row
+TARGET_FILE_SIZE_MB = 128      # Target ~128 MB por arquivo
+
+
+def criar_features_atraso(df_silver: DataFrame) -> DataFrame:
+    """
+    Gera features comportamentais de Atraso agregadas por cliente-mes.
+    """
+    print("\n" + "="*80)
+    print("GOLD ATRASO FEATURES - PIPELINE PRINCIPAL")
+    print("="*80 + "\n")
+
+    df = df_silver
+
+    # -------------------------------------------------------------------------
+    # PREPARACAO
+    # -------------------------------------------------------------------------
+    print(">>> [Prep] Preparando dados de Atraso...")
+
+    # Garantir safra_atraso existe
+    if "safra_atraso" not in df.columns:
+        df = df.withColumn(
+            "safra_atraso",
+            F.date_format(F.col("ts_referencia"), "yyyyMM")
+        )
+
+    # Criar dt_safra_atraso para joins temporais
+    df = df.withColumn(
+        "dt_safra_atraso",
+        F.to_date(F.concat(F.col("safra_atraso"), F.lit("01")), "yyyyMMdd")
+    )
+
+    # Garantir valores numericos
+    val_aberto = F.coalesce(F.col("val_fat_aberto"), F.lit(0.0))
+    val_bruto = F.coalesce(F.col("val_fat_bruto"), F.lit(0.0))
+    val_liquido = F.coalesce(F.col("val_fat_liquido"), F.lit(0.0))
+    val_pagamento = F.coalesce(F.col("val_fat_pagamento_bruto"), F.lit(0.0))
+    val_multa_juros = F.coalesce(F.col("val_multa_juros"), F.lit(0.0))
+
+    # Indicadores binarios - converter strings para int
+    # Valores como 'S', '1', 'Y' = 1, outros = 0
+    def str_to_binary(col_name):
+        return F.when(
+            F.upper(F.col(col_name)).isin(['1', 'S', 'Y', 'SIM', 'YES', 'TRUE']),
+            F.lit(1)
+        ).otherwise(F.lit(0))
+
+    ind_wo = str_to_binary("ind_wo") if "ind_wo" in df.columns else F.lit(0)
+    ind_pdd = str_to_binary("ind_pdd") if "ind_pdd" in df.columns else F.lit(0)
+    ind_fraude = str_to_binary("ind_fraude") if "ind_fraude" in df.columns else F.lit(0)
+    ind_aca = str_to_binary("ind_aca") if "ind_aca" in df.columns else F.lit(0)
+    ind_pccr = str_to_binary("ind_pccr") if "ind_pccr" in df.columns else F.lit(0)
+
+    # Flag de fatura em aberto
+    df = df.withColumn(
+        "flag_fatura_aberta",
+        F.when(val_aberto > 0, 1).otherwise(0)
+    )
+
+    # Classificar aging
+    df = df.withColumn(
+        "aging_bucket",
+        F.when(F.col("dw_faixa_aging_fatura") == "0-30 dias", "0_30")
+         .when(F.col("dw_faixa_aging_fatura") == "31-60 dias", "31_60")
+         .when(F.col("dw_faixa_aging_fatura") == "61-90 dias", "61_90")
+         .when(F.col("dw_faixa_aging_fatura") == ">90 dias", "90_plus")
+         .otherwise("missing")
+    )
+
+    # -------------------------------------------------------------------------
+    # AGREGACAO MENSAL
+    # -------------------------------------------------------------------------
+    print(">>> [Agg] Agregando por NUM_CPF + SAFRA_ATRASO...")
+
+    df_gold = df.groupBy("num_cpf", "safra_atraso", "dt_safra_atraso").agg(
+
+        # === FATURAS ABERTAS ===
+        F.count("*").alias("qtd_registros_mes"),
+        F.sum("flag_fatura_aberta").alias("qtd_faturas_abertas_mes"),
+        F.countDistinct(F.when(val_aberto > 0, F.col("contrato"))).alias("qtd_contratos_com_atraso_mes"),
+
+        # === VALORES EM ABERTO ===
+        F.sum(val_aberto).alias("sum_val_aberto_mes"),
+        F.avg(F.when(val_aberto > 0, val_aberto)).alias("avg_val_aberto_mes"),
+        F.max(val_aberto).alias("max_val_aberto_mes"),
+        F.min(F.when(val_aberto > 0, val_aberto)).alias("min_val_aberto_mes"),
+        F.stddev(F.when(val_aberto > 0, val_aberto)).alias("std_val_aberto_mes"),
+
+        # === FATURAMENTO ===
+        F.sum(val_bruto).alias("sum_val_fat_bruto_mes"),
+        F.sum(val_liquido).alias("sum_val_fat_liquido_mes"),
+        F.sum(val_pagamento).alias("sum_val_pagamento_mes"),
+        F.sum(val_multa_juros).alias("sum_val_multa_juros_mes"),
+
+        # === AGING DISTRIBUTION ===
+        F.sum(F.when(F.col("aging_bucket") == "0_30", 1).otherwise(0)).alias("qtd_aging_0_30_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "31_60", 1).otherwise(0)).alias("qtd_aging_31_60_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "61_90", 1).otherwise(0)).alias("qtd_aging_61_90_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "90_plus", 1).otherwise(0)).alias("qtd_aging_90_plus_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "missing", 1).otherwise(0)).alias("qtd_aging_missing_mes"),
+
+        # Valores por aging
+        F.sum(F.when(F.col("aging_bucket") == "0_30", val_aberto).otherwise(0)).alias("sum_val_aging_0_30_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "31_60", val_aberto).otherwise(0)).alias("sum_val_aging_31_60_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "61_90", val_aberto).otherwise(0)).alias("sum_val_aging_61_90_mes"),
+        F.sum(F.when(F.col("aging_bucket") == "90_plus", val_aberto).otherwise(0)).alias("sum_val_aging_90_plus_mes"),
+
+        # === INDICADORES DE RISCO ===
+        F.max(ind_wo).alias("flag_teve_wo_mes"),
+        F.max(ind_pdd).alias("flag_teve_pdd_mes"),
+        F.max(ind_fraude).alias("flag_teve_fraude_mes"),
+        F.sum(F.when(ind_wo == 1, 1).otherwise(0)).alias("qtd_com_wo_mes"),
+        F.sum(F.when(ind_pdd == 1, 1).otherwise(0)).alias("qtd_com_pdd_mes"),
+        F.sum(F.when(ind_fraude == 1, 1).otherwise(0)).alias("qtd_com_fraude_mes"),
+
+        # Valores em WO e PDD
+        F.sum(F.when(ind_wo == 1, val_aberto).otherwise(0)).alias("sum_val_wo_mes"),
+        F.sum(F.when(ind_pdd == 1, val_aberto).otherwise(0)).alias("sum_val_pdd_mes"),
+
+        # === INDICADORES DE RECUPERACAO ===
+        F.max(ind_aca).alias("flag_teve_aca_mes"),
+        F.max(ind_pccr).alias("flag_teve_pccr_mes"),
+        F.sum(F.when(ind_aca == 1, 1).otherwise(0)).alias("qtd_com_aca_mes"),
+        F.sum(F.when(ind_pccr == 1, 1).otherwise(0)).alias("qtd_com_pccr_mes"),
+
+        # === TIPO CLIENTE E PLATAFORMA ===
+        F.countDistinct(F.when(F.col("dw_tipo_cliente_conta").isNotNull(), F.col("dw_tipo_cliente_conta")))
+            .alias("qtd_tipos_cliente_distintos_mes"),
+        F.countDistinct(F.when(F.col("cod_plataforma").isNotNull(), F.col("cod_plataforma")))
+            .alias("qtd_plataformas_distintas_mes"),
+
+        # === TEMPO DE BASE ===
+        F.countDistinct(F.when(F.col("dw_faixa_tempo_base").isNotNull(), F.col("dw_faixa_tempo_base")))
+            .alias("qtd_faixas_tempo_base_mes"),
+    )
+
+    # -------------------------------------------------------------------------
+    # FEATURES DERIVADAS
+    # -------------------------------------------------------------------------
+    print(">>> [Deriv] Criando features derivadas...")
+
+    # Percentual por aging bucket
+    df_gold = df_gold.withColumn(
+        "pct_aging_0_30_mes",
+        F.when(
+            F.col("qtd_faturas_abertas_mes") > 0,
+            F.round((F.col("qtd_aging_0_30_mes") / F.col("qtd_faturas_abertas_mes")) * 100, 2)
+        ).otherwise(0.0)
+    ).withColumn(
+        "pct_aging_31_60_mes",
+        F.when(
+            F.col("qtd_faturas_abertas_mes") > 0,
+            F.round((F.col("qtd_aging_31_60_mes") / F.col("qtd_faturas_abertas_mes")) * 100, 2)
+        ).otherwise(0.0)
+    ).withColumn(
+        "pct_aging_61_90_mes",
+        F.when(
+            F.col("qtd_faturas_abertas_mes") > 0,
+            F.round((F.col("qtd_aging_61_90_mes") / F.col("qtd_faturas_abertas_mes")) * 100, 2)
+        ).otherwise(0.0)
+    ).withColumn(
+        "pct_aging_90_plus_mes",
+        F.when(
+            F.col("qtd_faturas_abertas_mes") > 0,
+            F.round((F.col("qtd_aging_90_plus_mes") / F.col("qtd_faturas_abertas_mes")) * 100, 2)
+        ).otherwise(0.0)
+    )
+
+    # Percentual de valor por aging
+    df_gold = df_gold.withColumn(
+        "pct_val_aging_90_plus_mes",
+        F.when(
+            F.col("sum_val_aberto_mes") > 0,
+            F.round((F.col("sum_val_aging_90_plus_mes") / F.col("sum_val_aberto_mes")) * 100, 2)
+        ).otherwise(0.0)
+    )
+
+    # Ticket medio de fatura em aberto
+    df_gold = df_gold.withColumn(
+        "ticket_medio_aberto_mes",
+        F.when(
+            F.col("qtd_faturas_abertas_mes") > 0,
+            F.round(F.col("sum_val_aberto_mes") / F.col("qtd_faturas_abertas_mes"), 2)
+        ).otherwise(0.0)
+    )
+
+    # Ratio aberto/faturado (quanto do faturado ainda esta em aberto)
+    df_gold = df_gold.withColumn(
+        "ratio_aberto_faturado_mes",
+        F.when(
+            F.col("sum_val_fat_bruto_mes") > 0,
+            F.round(F.col("sum_val_aberto_mes") / F.col("sum_val_fat_bruto_mes"), 4)
+        ).otherwise(0.0)
+    )
+
+    # Ratio pagamento/faturado (quanto foi pago)
+    df_gold = df_gold.withColumn(
+        "ratio_pagamento_faturado_mes",
+        F.when(
+            F.col("sum_val_fat_bruto_mes") > 0,
+            F.round(F.col("sum_val_pagamento_mes") / F.col("sum_val_fat_bruto_mes"), 4)
+        ).otherwise(0.0)
+    )
+
+    # Coeficiente de variacao
+    df_gold = df_gold.withColumn(
+        "coef_variacao_aberto_mes",
+        F.when(
+            (F.col("avg_val_aberto_mes").isNotNull()) & (F.col("avg_val_aberto_mes") > 0),
+            F.round(F.col("std_val_aberto_mes") / F.col("avg_val_aberto_mes"), 4)
+        ).otherwise(None)
+    )
+
+    # Percentual WO sobre aberto
+    df_gold = df_gold.withColumn(
+        "pct_val_wo_sobre_aberto_mes",
+        F.when(
+            F.col("sum_val_aberto_mes") > 0,
+            F.round((F.col("sum_val_wo_mes") / F.col("sum_val_aberto_mes")) * 100, 2)
+        ).otherwise(0.0)
+    )
+
+    # -------------------------------------------------------------------------
+    # FLAGS DE COMPORTAMENTO
+    # -------------------------------------------------------------------------
+    print(">>> [Flags] Criando flags de comportamento...")
+
+    # Sem atraso no mes
+    df_gold = df_gold.withColumn(
+        "flag_sem_atraso_mes",
+        F.when(F.col("qtd_faturas_abertas_mes") == 0, 1).otherwise(0)
+    )
+
+    # Atraso grave (>50% em aging 90+)
+    df_gold = df_gold.withColumn(
+        "flag_atraso_grave_mes",
+        F.when(F.col("pct_aging_90_plus_mes") > 50, 1).otherwise(0)
+    )
+
+    # Risco alto (WO ou PDD ou Fraude)
+    df_gold = df_gold.withColumn(
+        "flag_risco_alto_mes",
+        F.when(
+            (F.col("flag_teve_wo_mes") == 1) |
+            (F.col("flag_teve_pdd_mes") == 1) |
+            (F.col("flag_teve_fraude_mes") == 1),
+            1
+        ).otherwise(0)
+    )
+
+    # Em recuperacao (ACA ou PCCR)
+    df_gold = df_gold.withColumn(
+        "flag_em_recuperacao_mes",
+        F.when(
+            (F.col("flag_teve_aca_mes") == 1) |
+            (F.col("flag_teve_pccr_mes") == 1),
+            1
+        ).otherwise(0)
+    )
+
+    # Alto valor em aberto (>R$500)
+    df_gold = df_gold.withColumn(
+        "flag_alto_valor_aberto_mes",
+        F.when(F.col("sum_val_aberto_mes") > 500, 1).otherwise(0)
+    )
+
+    # Muitas faturas abertas (>3)
+    df_gold = df_gold.withColumn(
+        "flag_muitas_faturas_abertas_mes",
+        F.when(F.col("qtd_faturas_abertas_mes") > 3, 1).otherwise(0)
+    )
+
+    # Concentracao em aging grave
+    df_gold = df_gold.withColumn(
+        "flag_concentrado_aging_grave_mes",
+        F.when(F.col("pct_val_aging_90_plus_mes") > 70, 1).otherwise(0)
+    )
+
+    # -------------------------------------------------------------------------
+    # METADADOS
+    # -------------------------------------------------------------------------
+    df_gold = df_gold.withColumn("gold_version", F.lit(GOLD_VERSION))
+    df_gold = df_gold.withColumn("gold_build_date", F.current_timestamp())
+
+    print(f">>> [Info] Features geradas: {len(df_gold.columns)} colunas")
+
+    return df_gold
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Gerar Gold Atraso Features v2")
+    parser.add_argument("--input_path", default=DEFAULT_SILVER_ATRASO_PATH)
+    parser.add_argument("--output_path", default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--format", default=DEFAULT_FORMAT)
+    parser.add_argument("--skip_save", action="store_true")
+
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        print(f">>> [Config] Ignorando argumentos nao reconhecidos: {unknown[:2]}...")
+
+    print("\n")
+    print("=" * 78)
+    print("GOLD ATRASO FEATURES V2 - OCI Data Flow".center(78))
+    print("=" * 78)
+    print("\n")
+
+    spark = SparkSession.builder.appName("gold_atraso_optz_sf").getOrCreate()
+
+    # =========================================================================
+    # 1) LEITURA SILVER
+    # =========================================================================
+    print(f">>> [Leitura] Carregando Silver Atraso: {args.input_path}")
+    try:
+        df_silver = spark.read.format(args.format).load(args.input_path)
+    except Exception as e:
+        print(f"!!! ERRO: {e}")
+        sys.exit(1)
+
+    # =========================================================================
+    # 2) PROCESSAMENTO — ACTION 1 (groupBy + write)
+    # =========================================================================
+    df_gold = criar_features_atraso(df_silver)
+
+    if not args.skip_save:
+        print(f"\n>>> [Escrita] Salvando: {args.output_path}")
+
+        # --- Coalesce dinamico (otimizacao small files) ---
+        count_gold = df_gold.count()
+        estimated_size_mb = count_gold * BYTES_PER_ROW_ESTIMATE / (1024 * 1024)
+        num_output_files = max(1, int(estimated_size_mb / TARGET_FILE_SIZE_MB))
+        print(f">>> [Otimizacao] repartition({num_output_files}, safra_atraso) — ~{TARGET_FILE_SIZE_MB}MB/arquivo")
+        print(f">>> [Otimizacao] {count_gold:,} registros, ~{estimated_size_mb:.0f} MB estimados")
+
+        df_gold.repartition(num_output_files, "safra_atraso") \
+            .write \
+            .format("delta") \
+            .mode("overwrite") \
+            .partitionBy("safra_atraso") \
+            .option("mergeSchema", "true") \
+            .save(args.output_path)
+        print(">>> [Escrita] Gold gravada com sucesso.")
+
+        # =====================================================================
+        # 3) QUALITY CHECK na Gold JA ESCRITA — ACTION 2
+        # =====================================================================
+        print(f"\n>>> [Quality] Lendo Gold gravada para validacao: {args.output_path}")
+        df_written = spark.read.format("delta").load(args.output_path)
+
+        quality = df_written.agg(
+            F.count("*").alias("total"),
+            F.countDistinct("num_cpf", "safra_atraso").alias("distinct_keys"),
+            F.countDistinct("num_cpf").alias("cpfs_distintos"),
+            F.countDistinct("safra_atraso").alias("safras_distintas"),
+            F.sum(F.when(F.col("num_cpf").isNull(), 1).otherwise(0)).alias("nulos_cpf"),
+            F.sum(F.when(F.col("flag_risco_alto_mes") == 1, 1).otherwise(0)).alias("risco_alto"),
+            F.sum(F.when(F.col("flag_sem_atraso_mes") == 1, 1).otherwise(0)).alias("sem_atraso"),
+            F.sum(F.when(F.col("flag_atraso_grave_mes") == 1, 1).otherwise(0)).alias("atraso_grave"),
+        ).collect()[0]
+
+        count_gold    = quality["total"]
+        distinct_keys = quality["distinct_keys"]
+        cpfs          = quality["cpfs_distintos"]
+        safras        = quality["safras_distintas"]
+        nulos_cpf     = quality["nulos_cpf"]
+        risco_alto    = quality["risco_alto"]
+        sem_atraso    = quality["sem_atraso"]
+        atraso_grave  = quality["atraso_grave"]
+
+        print("\n" + "="*80)
+        print(">>> [Quality] RELATORIO DE QUALIDADE - GOLD ATRASO")
+        print("="*80)
+        print(f"\n    Registros Gold (1 linha/CPF+SAFRA):  {count_gold:>12,}")
+        print(f"    Chaves distintas (num_cpf+safra):    {distinct_keys:>12,}  [esperado = total]")
+        print(f"    Unicidade OK:                        {'SIM' if count_gold == distinct_keys else 'NAO — VERIFICAR'}")
+        print(f"\n    CPFs distintos:                      {cpfs:>12,}")
+        print(f"    Safras distintas:                    {safras:>12,}")
+        print(f"\n    Gate 1 - NUM_CPF nulos:              {nulos_cpf:>12,}  [esperado = 0]")
+        print(f"\n    Flag risco alto (WO/PDD/Fraude):     {risco_alto:>12,}  ({100*risco_alto/count_gold:.2f}%)")
+        print(f"    Flag sem atraso no mes:              {sem_atraso:>12,}  ({100*sem_atraso/count_gold:.2f}%)")
+        print(f"    Flag atraso grave (>50% em 90+):     {atraso_grave:>12,}  ({100*atraso_grave/count_gold:.2f}%)")
+
+        print("\n" + "="*80)
+        print("Gold ATRASO concluido")
+        print(f"  - Registros:          {count_gold:,}")
+        print(f"  - Compressao:         Silver (N linhas/CPF) → Gold (1 linha/CPF+SAFRA)")
+        print(f"  - Actions:            2 (groupBy+write + agg Gold escrita)")
+        print(f"  - Particionamento:    safra_atraso")
+        print(f"  - Proximo passo:      abt_v6_builder.py")
+        print("="*80 + "\n")
+
+    return df_gold
+
+
+if __name__ == "__main__":
+    main()
