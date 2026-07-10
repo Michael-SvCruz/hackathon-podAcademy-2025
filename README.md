@@ -1,5 +1,12 @@
 # Hackathon PodAcademy 2025 - Modelagem de Risco de Crédito
 
+**Contribuição de Alisson Junio:**
+- Participação na construção dos pipelines de Engenharia de Dados (Bronze, Silver, Gold).
+- Desenvolvimento de features avançadas e validação de ABTs.
+- Documentação e automação de processos.
+
+
+
 **Status:** Engenharia de Dados COMPLETA | **Início:** Dez/2025 | **Grupo:** Hackathon PodAcademy 2025
 
 ---
@@ -327,5 +334,9 @@ exclude_cols = ["num_cpf", "safra", "dt_safra", "fpd_int", "flag_instalacao_int"
 [Ver LICENSE](LICENSE)
 
 ---
+
+## Contato
+- Telefone: (16) 99409-0818
+- E‑mail: alisson.junio@hotmail.com
 
 **Última Atualização:** 30 Jan 2026 | **Versão:** 3.0 | **Status:** Engenharia de Dados COMPLETO | **Próximo:** Modelagem
