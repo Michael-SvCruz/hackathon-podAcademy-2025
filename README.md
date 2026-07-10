@@ -1,5 +1,6 @@
 # Hackathon PodAcademy 2025 - Modelagem de Risco de Crédito
 
+
 **Status:** Engenharia de Dados COMPLETA | **Início:** Dez/2025 | **Grupo:** Hackathon PodAcademy 2025
 
 ---
