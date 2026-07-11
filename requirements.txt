@@ -1,0 +1,13 @@
+﻿# Dependencias Python para o projeto Hackathon PodAcademy 2025
+# Gerado automaticamente a partir dos imports do codigo-fonte
+
+# PySpark (motor de processamento distribuido)
+pyspark==3.5.1
+
+# Delta Lake (formato de tabelas transacionais usado pelo projeto)
+delta-spark==3.2.0
+
+# Pytest para testes unitarios
+pytest>=7.4.0
+pytest-mock>=3.12.0
+
