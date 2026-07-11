@@ -114,6 +114,93 @@ GOLD (Tabelas de Features)              GOLD (ABTs)
 
 ---
 
+## Configuração do Ambiente
+
+### Pré-requisitos
+
+**Via Docker (Recomendado)**
+- **Git** — para clonar o repositório
+- **Docker Desktop** — toda a stack (Python 3.10, Java 17, Spark) já vem na imagem
+
+**Via Ambiente Local**
+- **Python 3.10+**, **Java 17**, **Apache Spark 3.5+**, **Git**
+
+---
+
+### Passo 1 — Clonar o repositório
+
+```bash
+git clone https://github.com/alissonjns/hackathon-podAcademy-2025025.git
+cd hackathon-podAcademy-2025025
+```
+
+> **Atenção:** O `Dockerfile` está **um nível acima** desta pasta. Todos os comandos Docker devem ser executados a partir dessa pasta raiz (onde o `Dockerfile` está).
+
+---
+
+### Opção A — Docker (Recomendado)
+
+Garante reprodutibilidade em qualquer máquina, sem instalar Java ou Spark manualmente.
+
+**Passo 2 — Buildar a imagem Docker**
+
+```bash
+docker build -t hackathon-podacademy .
+```
+
+> Pode levar alguns minutos na primeira vez — o Docker baixa a imagem base e instala todas as dependências.
+
+**Passo 3 — Validar que o ambiente PySpark está funcionando**
+
+```bash
+docker run --rm hackathon-podacademy
+```
+
+Saída esperada:
+```
+✅ PySpark funcionando! Versao: 3.5.x
+```
+
+**Passo 4 — Rodar os testes**
+
+```bash
+docker run --rm hackathon-podacademy pytest tests/ -v
+```
+
+**Passo 5 (Opcional) — Shell interativo para explorar o código**
+
+```bash
+docker run -it --rm hackathon-podacademy bash
+```
+
+---
+
+### Opção B — Ambiente Local
+
+```bash
+# Criar e ativar ambiente virtual
+python -m venv .venv
+source .venv/bin/activate        # Linux/macOS
+.\.venv\Scripts\activate          # Windows PowerShell
+
+# Instalar dependências
+pip install -r requirements.txt
+
+# Verificar instalação
+python -c "from pyspark.sql import SparkSession; print('PySpark OK')"
+
+# Rodar os testes
+pytest tests/ -v
+```
+
+---
+
+### Sobre os Testes
+
+> Os testes utilizam **dados sintéticos gerados em memória** — não é necessário acesso ao Databricks ou dados reais para executá-los. Eles validam a lógica do pipeline, as regras de negócio e o anti-leakage.
+
+---
+
 ## Como Executar
 
 ### Pipeline Completo (Databricks)
